@@ -4,7 +4,6 @@ use chrono::{DateTime, Utc};
 use crossbeam::channel::unbounded;
 use crossbeam::channel::Receiver;
 use crossbeam::channel::Sender;
-use std::collections::HashMap;
 
 use std::fs::File;
 use std::io::Write;
@@ -13,7 +12,7 @@ use std::io::Write;
 /// Structure of a Processor
 pub struct Processor {
     pub id: u32,
-    pub gossip: HashMap<u32, Sender<Message>>,
+    pub gossip: Vec<Sender<Message>>,
     msg_recv: Option<Message>,
     pub tx: Sender<Message>,
     rx: Receiver<Message>,
@@ -29,7 +28,7 @@ impl Processor {
         let (tx, rx) = unbounded();
         Processor {
             id: id,
-            gossip: HashMap::new(),
+            gossip: Vec::new(),
             msg_recv: None,
             tx: tx,
             rx: rx,
@@ -41,8 +40,8 @@ impl Processor {
         self.tx.clone()
     }
 
-    pub fn add_gossip_peer(&mut self, id: u32, proc_tx: Sender<Message>) {
-        self.gossip.insert(id, proc_tx);
+    pub fn add_gossip_peer(&mut self, proc_tx: Sender<Message>) {
+        self.gossip.push(proc_tx);
     }
 
     pub fn broadcast_murmur(&mut self, content: String) {
@@ -55,7 +54,7 @@ impl Processor {
                 self.id,
                 timestamp,
             ));
-            for (_, tx) in &self.gossip.clone() {
+            for tx in &self.gossip.clone() {
                 let msg: Message = Message::new(content.clone(), sig.clone(), self.id, timestamp);
                 self.forward_murmur(msg, tx.clone())
             }
@@ -70,7 +69,7 @@ impl Processor {
     fn dispatch_murmur(&mut self, msg: Message) {
         if self.msg_recv.is_none() {
             self.msg_recv = Some(msg.clone());
-            for (_, tx) in &self.gossip.clone() {
+            for tx in &self.gossip.clone() {
                 self.forward_murmur(msg.clone(), tx.clone())
             }
         }
