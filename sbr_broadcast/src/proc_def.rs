@@ -6,6 +6,9 @@ use crossbeam::channel::Receiver;
 use crossbeam::channel::Sender;
 use std::collections::HashMap;
 
+use std::fs::File;
+use std::io::Write;
+
 #[derive(Debug, Clone)]
 /// Structure of a Processor
 pub struct Processor {
@@ -14,6 +17,7 @@ pub struct Processor {
     msg_recv: Option<Message>,
     pub tx: Sender<Message>,
     rx: Receiver<Message>,
+    send_counter: u32,
 }
 
 impl Processor {
@@ -29,6 +33,7 @@ impl Processor {
             msg_recv: None,
             tx: tx,
             rx: rx,
+            send_counter: 0,
         }
     }
 
@@ -59,6 +64,7 @@ impl Processor {
 
     fn forward_murmur(&mut self, msg: Message, tx: Sender<Message>) {
         tx.send(msg).unwrap();
+        self.send_counter += 1;
     }
 
     fn dispatch_murmur(&mut self, msg: Message) {
@@ -72,12 +78,19 @@ impl Processor {
 
     fn deliver_murmur(&mut self, msg: Message) {
         if msg.verify_murmur() {
+            let mut file: File = File::create(format!("check/{}.txt", self.id)).unwrap();
+            let wf = file.write(b"DELIVERED");
+            match wf {
+                Ok(_) => (),
+                Err(err) => println!("ERROR writing delivered file : {}", err),
+            }
             self.dispatch_murmur(msg);
         }
     }
 
     pub fn listen(&mut self) {
         loop {
+            println!("Processor {} send counter : {}", self.id, self.send_counter);
             let msg: Message = self.rx.recv().unwrap();
             let f_msg: Message = msg.clone();
             if self.msg_recv.is_none() {
