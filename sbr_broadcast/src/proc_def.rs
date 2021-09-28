@@ -1,20 +1,19 @@
 use crate::msg_def::Message;
 
 use chrono::{DateTime, Utc};
+use crossbeam::channel::unbounded;
+use crossbeam::channel::Receiver;
+use crossbeam::channel::Sender;
 use std::collections::HashMap;
-use std::sync::mpsc::channel;
-use std::sync::mpsc::Receiver;
-use std::sync::mpsc::Sender;
-use std::sync::Arc;
-use std::sync::Mutex;
 
+#[derive(Debug, Clone)]
 /// Structure of a Processor
 pub struct Processor {
     pub id: u32,
     pub gossip: HashMap<u32, Sender<Message>>,
     msg_recv: Option<Message>,
-    pub tx: Arc<Mutex<Sender<Message>>>,
-    rx: Arc<Mutex<Receiver<Message>>>,
+    pub tx: Sender<Message>,
+    rx: Receiver<Message>,
 }
 
 impl Processor {
@@ -23,18 +22,18 @@ impl Processor {
     ///
     /// * `id` - A unique ID.
     pub fn new(id: u32) -> Processor {
-        let (tx, rx) = channel();
+        let (tx, rx) = unbounded();
         Processor {
             id: id,
             gossip: HashMap::new(),
             msg_recv: None,
-            tx: Arc::new(Mutex::new(tx)),
-            rx: Arc::new(Mutex::new(rx)),
+            tx: tx,
+            rx: rx,
         }
     }
 
     pub fn get_sender(&self) -> Sender<Message> {
-        self.tx.lock().unwrap().clone()
+        self.tx.clone()
     }
 
     pub fn add_gossip_peer(&mut self, id: u32, proc_tx: Sender<Message>) {
@@ -49,27 +48,24 @@ impl Processor {
                 content.clone(),
                 sig.clone(),
                 self.id,
-                self.id,
                 timestamp,
             ));
-            for (id, tx) in &self.gossip.clone() {
-                let msg: Message =
-                    Message::new(content.clone(), sig.clone(), self.id, *id, timestamp);
-                self.forward_murmur(msg, tx.clone(), *id)
+            for (_, tx) in &self.gossip.clone() {
+                let msg: Message = Message::new(content.clone(), sig.clone(), self.id, timestamp);
+                self.forward_murmur(msg, tx.clone())
             }
         }
     }
 
-    fn forward_murmur(&mut self, msg: Message, tx: Sender<Message>, id: u32) {
-        println!("Send from {} to {}", self.id, id);
+    fn forward_murmur(&mut self, msg: Message, tx: Sender<Message>) {
         tx.send(msg).unwrap();
     }
 
     fn dispatch_murmur(&mut self, msg: Message) {
         if self.msg_recv.is_none() {
             self.msg_recv = Some(msg.clone());
-            for (id, tx) in &self.gossip.clone() {
-                self.forward_murmur(msg.clone(), tx.clone(), *id)
+            for (_, tx) in &self.gossip.clone() {
+                self.forward_murmur(msg.clone(), tx.clone())
             }
         }
     }
@@ -80,11 +76,15 @@ impl Processor {
         }
     }
 
-    pub fn listen(self) {
+    pub fn listen(&mut self) {
         loop {
-            let msg: Message = self.rx.lock().unwrap().recv().unwrap();
-            println!("Processor {} received :", self.id);
-            msg.print_message_info();
+            let msg: Message = self.rx.recv().unwrap();
+            let f_msg: Message = msg.clone();
+            if self.msg_recv.is_none() {
+                println!("DELIVER : id {}", self.id);
+                msg.print_message_info();
+                self.deliver_murmur(f_msg);
+            }
         }
     }
 }

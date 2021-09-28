@@ -4,25 +4,17 @@ pub struct Message {
     content: String,
     signature: String,
     from: u32,
-    to: u32,
     timestamp: DateTime<Utc>,
 }
 
 use chrono::{DateTime, Utc};
 
 impl Message {
-    pub fn new(
-        content: String,
-        signature: String,
-        from: u32,
-        to: u32,
-        timestamp: DateTime<Utc>,
-    ) -> Message {
+    pub fn new(content: String, signature: String, from: u32, timestamp: DateTime<Utc>) -> Message {
         Message {
             content: content,
             signature: signature,
             from: from,
-            to: to,
             timestamp: timestamp,
         }
     }
@@ -34,8 +26,8 @@ impl Message {
 
     pub fn print_message_info(self) {
         println!(
-            "Got message : {}, from : {}, to : {}, time: {}",
-            self.content, self.from, self.to, self.timestamp
+            "Got message : {}, from : {}, time: {}",
+            self.content, self.from, self.timestamp
         );
     }
 }
