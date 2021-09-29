@@ -20,10 +20,10 @@ impl Message {
     ///
     pub fn new(content: String, signature: String, from: u32, timestamp: DateTime<Utc>) -> Message {
         Message {
-            content: content,
-            signature: signature,
-            from: from,
-            timestamp: timestamp,
+            content,
+            signature,
+            from,
+            timestamp,
         }
     }
 

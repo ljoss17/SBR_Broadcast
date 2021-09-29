@@ -1,25 +1,21 @@
-use crate::msg_def::Message;
-use crate::proc_def::Processor;
+use crate::definition_message::Message;
+use crate::definition_processor::Processor;
 use crossbeam::channel::Sender;
 use rand::prelude::*;
 use std::collections::HashMap;
-use std::thread;
 
-/// Initialise the system of processors given a list of processor IDs
-/// and a size of Gossip group.
+/// Update a vector of Processor to link Gossip groups.
 /// # Arguments
 ///
-/// * `system` - A vector of IDs for the processors to initialise.
+/// * `processors` - A reference to the vector of Processor.
+/// * `system` - A reference to the vector of IDs.
 /// * `g` - A integer which determines the size of the Gossip group for each processor.
 ///
-pub fn initialise_murmur(system: Vec<u32>, g: u32) -> Vec<Sender<Message>> {
-    // Initialise Processors ids and channels.
-    let mut processors: Vec<Processor> = Vec::new();
+pub fn initialise_murmur(processors: &mut Vec<Processor>, system: &Vec<u32>, g: u32) {
+    // Get Sender channels.
     let mut senders: HashMap<u32, Sender<Message>> = HashMap::new();
-    for &i in &system {
-        let p = Processor::new(i);
-        let sender: &Sender<Message> = &p.get_sender();
-        processors.push(p);
+    for &i in system {
+        let sender: &Sender<Message> = &processors[i as usize].get_sender();
         senders.insert(i, sender.clone());
     }
 
@@ -44,22 +40,34 @@ pub fn initialise_murmur(system: Vec<u32>, g: u32) -> Vec<Sender<Message>> {
             }
         }
     }
+}
 
+/// Get a Gossip group from the list of Processor.
+/// # Arguments
+///
+/// * `processors` - A reference to the vector of Processor.
+/// * `system` - A reference to the vector of IDs.
+/// * `g` - A integer which determines the size of the Gossip group for each processor.
+///
+pub fn get_sender_gossip(
+    processors: &mut Vec<Processor>,
+    system: &Vec<u32>,
+    g: u32,
+) -> Vec<Sender<Message>> {
+    // Get Sender channels.
+    let mut senders: HashMap<u32, Sender<Message>> = HashMap::new();
+    for &i in system {
+        let sender: &Sender<Message> = &processors[i as usize].get_sender();
+        senders.insert(i, sender.clone());
+    }
     // Create gossip peers for the sender Processor.
     let mut sender_peers: Vec<Sender<Message>> = Vec::new();
+    let mut rng = rand::thread_rng();
+    let num_proc = processors.len();
     for _ in 0..g {
         let n = rng.gen_range(0..num_proc);
         let random_id: u32 = system[n];
         sender_peers.push(senders[&random_id].clone());
-    }
-
-    // Create a thread per Processor to listen for incoming messages.
-    let n_p: usize = processors.len();
-    for p_id in 0..n_p {
-        let mut proc: Processor = processors[p_id].clone();
-        thread::spawn(move || {
-            proc.listen();
-        });
     }
     sender_peers
 }
