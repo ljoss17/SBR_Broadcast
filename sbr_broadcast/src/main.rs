@@ -56,6 +56,11 @@ fn add_processors(processors: &mut Vec<Processor>, system: &Vec<u32>) {
     }
 }
 
+/// Spawn a thread for each Processor in which they listen for incoming messages.
+/// # Arguments
+///
+/// * `processors` - A vector of Processor to update with new processors.
+///
 fn spawn_processors(processors: &mut Vec<Processor>) {
     // Create a thread per Processor to listen for incoming messages.
     let n_p: usize = processors.len();
