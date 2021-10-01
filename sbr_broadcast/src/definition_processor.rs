@@ -1,9 +1,10 @@
-use crate::definition_message::Message;
+use crate::definition_message::{Message, MessageType};
 
 use chrono::{DateTime, Utc};
 use crossbeam::channel::unbounded;
 use crossbeam::channel::Receiver;
 use crossbeam::channel::Sender;
+use std::collections::HashMap;
 
 use std::fs::File;
 use std::io::Write;
@@ -13,7 +14,12 @@ use std::io::Write;
 pub struct Processor {
     pub id: u32,
     pub gossip: Vec<Sender<Message>>,
+    pub echo_peers: Vec<Sender<Message>>,
+    delivered: Option<Message>,
     murmur_message: Option<Message>,
+    echo: Option<Message>,
+    echo_messages: HashMap<u32, Message>,
+    pub echo_thr: u32,
     pub tx: Sender<Message>,
     rx: Receiver<Message>,
     send_counter: u32,
@@ -30,7 +36,12 @@ impl Processor {
         Processor {
             id,
             gossip: Vec::new(),
+            echo_peers: Vec::new(),
+            delivered: None,
             murmur_message: None,
+            echo: None,
+            echo_messages: HashMap::new(),
+            echo_thr: 0,
             tx,
             rx,
             send_counter: 0,
@@ -48,8 +59,18 @@ impl Processor {
     ///
     /// * `proc_tx` - A clone of the Sender<Message> to add.
     ///
-    pub fn add_gossip_peer(&mut self, proc_tx: Sender<Message>) {
-        self.gossip.push(proc_tx);
+    pub fn handle_gossip_subscription(&mut self, proc_tx: Sender<Message>) {
+        if self.murmur_message.is_some() {
+            self.al_send(self.murmur_message.clone().unwrap(), proc_tx.clone());
+        }
+        self.gossip.push(proc_tx.clone());
+    }
+
+    pub fn handle_echo_subscription(&mut self, proc_tx: Sender<Message>) {
+        if self.echo.is_some() {
+            self.al_send(self.echo.clone().unwrap(), proc_tx.clone());
+        }
+        self.echo_peers.push(proc_tx.clone());
     }
 
     /// Broadcast a message to the Processor's Gossip group.
@@ -65,11 +86,22 @@ impl Processor {
                 content.clone(),
                 sig.clone(),
                 self.id,
+                self.id,
+                self.tx.clone(),
                 timestamp,
+                MessageType::Text,
             ));
             for tx in &self.gossip.clone() {
-                let msg: Message = Message::new(content.clone(), sig.clone(), self.id, timestamp);
-                self.forward_murmur(msg, tx.clone())
+                let msg: Message = Message::new(
+                    content.clone(),
+                    sig.clone(),
+                    self.id,
+                    self.id,
+                    self.tx.clone(),
+                    timestamp,
+                    MessageType::Text,
+                );
+                self.al_send(msg, tx.clone())
             }
         }
     }
@@ -80,8 +112,9 @@ impl Processor {
     /// * `msg` - The Message to forward.
     /// * `tx` - The target Processor's Sender<Message>.
     ///
-    fn forward_murmur(&mut self, msg: Message, tx: Sender<Message>) {
-        tx.send(msg).unwrap();
+    fn al_send(&mut self, msg: Message, tx: Sender<Message>) {
+        let new_msg = msg.create_forward_message(self.id);
+        tx.send(new_msg).unwrap();
         self.send_counter += 1;
     }
 
@@ -95,8 +128,34 @@ impl Processor {
     ///
     /// * `msg` - The Message to forward.
     ///
-    fn deliver_murmur(&mut self, msg: Message) {
+    fn al_deliver(&mut self, msg: Message) {
+        if msg.verify_murmur() && self.murmur_message.is_none() {
+            self.murmur_message = Some(msg.clone());
+            for tx in &self.gossip.clone() {
+                self.al_send(msg.clone(), tx.clone())
+            }
+            // pb.Deliver
+            self.pb_deliver(msg);
+        }
+    }
+
+    fn send_echo(&mut self, msg: Message, tx: Sender<Message>) {
+        let new_msg = msg.create_forward_echo(self.id);
+        tx.send(new_msg).unwrap();
+        self.send_counter += 1;
+    }
+
+    fn pb_deliver(&mut self, msg: Message) {
         if msg.verify_murmur() {
+            self.echo = Some(msg.clone());
+            for tx in self.echo_peers.clone() {
+                self.send_echo(msg.clone(), tx);
+            }
+        }
+    }
+
+    fn check_echoes(&mut self) {
+        if self.echo_messages.len() >= self.echo_thr as usize && self.delivered.is_none() {
             // *** Optional lines used to verify delivery of messages. ***
             let mut file: File = File::create(format!("check/{}.txt", self.id)).unwrap();
             let wf = file.write(b"DELIVERED");
@@ -105,10 +164,24 @@ impl Processor {
                 Err(err) => println!("ERROR writing delivered file : {}", err),
             }
             // *** End of optional lines ***
-            self.murmur_message = Some(msg.clone());
-            for tx in &self.gossip.clone() {
-                self.forward_murmur(msg.clone(), tx.clone())
-            }
+            self.delivered = self.echo.clone();
+        }
+    }
+
+    fn deliver_echo(&mut self, id: u32, msg: Message) {
+        if !self.echo_messages.contains_key(&id) && msg.verify_murmur() {
+            self.echo_messages.insert(id, msg);
+        }
+        self.check_echoes();
+    }
+
+    fn handle_message(&mut self, msg: Message) {
+        let check_msg: Message = msg.clone();
+        match check_msg.message_type {
+            MessageType::Text => self.al_deliver(msg),
+            MessageType::Gossip => self.handle_gossip_subscription(msg.from_tx.clone()),
+            MessageType::Echo => self.deliver_echo(msg.from, msg),
+            MessageType::EchoSubscription => self.handle_echo_subscription(msg.from_tx.clone()),
         }
     }
 
@@ -116,14 +189,17 @@ impl Processor {
     ///
     pub fn listen(&mut self) {
         loop {
-            println!("Processor {} send counter : {}", self.id, self.send_counter);
+            //println!("Processor {} send counter : {}", self.id, self.send_counter);
             let msg: Message = self.rx.recv().unwrap();
+            self.handle_message(msg);
+            /*
             let f_msg: Message = msg.clone();
             if self.murmur_message.is_none() {
                 println!("DELIVER : id {}", self.id);
                 msg.print_message_info();
                 self.deliver_murmur(f_msg);
             }
+            */
         }
     }
 }

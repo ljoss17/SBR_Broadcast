@@ -1,10 +1,23 @@
+use crossbeam::channel::Sender;
+
+#[derive(Debug, Clone)]
+pub enum MessageType {
+    Text,
+    Gossip,
+    Echo,
+    EchoSubscription,
+}
+
 #[derive(Debug, Clone)]
 /// Structure of a Message
 pub struct Message {
     content: String,
     signature: String,
-    from: u32,
+    pub author: u32,
+    pub from: u32,
+    pub from_tx: Sender<Message>,
     timestamp: DateTime<Utc>,
+    pub message_type: MessageType,
 }
 
 use chrono::{DateTime, Utc};
@@ -18,12 +31,23 @@ impl Message {
     /// * `from` - Sender ID.
     /// * `timestamp` - Timestamp of the message.
     ///
-    pub fn new(content: String, signature: String, from: u32, timestamp: DateTime<Utc>) -> Message {
+    pub fn new(
+        content: String,
+        signature: String,
+        author: u32,
+        from: u32,
+        from_tx: Sender<Message>,
+        timestamp: DateTime<Utc>,
+        message_type: MessageType,
+    ) -> Message {
         Message {
             content,
             signature,
+            author,
             from,
+            from_tx,
             timestamp,
+            message_type,
         }
     }
 
@@ -34,12 +58,16 @@ impl Message {
             .eq(format!("{}{}", self.from, self.content).as_str())
     }
 
-    /// Function used to print information of the message.
-    ///
-    pub fn print_message_info(self) {
-        println!(
-            "Got message : {}, from : {}, time: {}",
-            self.content, self.from, self.timestamp
-        );
+    pub fn create_forward_message(self, id: u32) -> Message {
+        let mut new_message: Message = self.clone();
+        new_message.from = id;
+        new_message
+    }
+
+    pub fn create_forward_echo(self, id: u32) -> Message {
+        let mut new_echo: Message = self.clone();
+        new_echo.message_type = MessageType::Echo;
+        new_echo.from = id;
+        new_echo
     }
 }
