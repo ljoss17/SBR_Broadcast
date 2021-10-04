@@ -7,6 +7,7 @@ mod sieve;
 use crate::definition_processor::Processor;
 use crate::murmur::{get_sender_gossip, initialise_murmur};
 use crate::sieve::initialise_sieve;
+use std::env;
 use std::thread;
 use std::time::Duration;
 
@@ -14,14 +15,43 @@ extern crate chrono;
 extern crate rand;
 
 fn main() {
-    let n: usize = 128;
+    let n_str = env::args().nth(1).expect("Size of system N.");
+    let n: usize = match n_str.parse() {
+        Ok(n) => n,
+        Err(_) => {
+            println!("Expected number for first argument, got : {}", n_str);
+            return;
+        }
+    };
+    let g_str = env::args().nth(2).expect("Size of Gossip group G.");
+    let g: u32 = match g_str.parse() {
+        Ok(g) => g,
+        Err(_) => {
+            println!("Expected number for second argument, got : {}", g_str);
+            return;
+        }
+    };
+    let e_str = env::args().nth(3).expect("Size of Echo group E.");
+    let e: u32 = match e_str.parse() {
+        Ok(e) => e,
+        Err(_) => {
+            println!("Expected number for third argument, got : {}", e_str);
+            return;
+        }
+    };
+    let e_thr_str = env::args().nth(4).expect("Echo threshold E_thr.");
+    let e_thr: u32 = match e_thr_str.parse() {
+        Ok(e_thr) => e_thr,
+        Err(_) => {
+            println!("Expected number for fourth argument, got : {}", e_thr_str);
+            return;
+        }
+    };
+
     let mut system: Vec<u32> = vec![0; n];
     for i in 0..n {
         system[i] = i as u32;
     }
-    let g: u32 = 8;
-    let e: u32 = 126;
-    let e_thr: u32 = 101;
 
     let mut processors: Vec<Processor> = Vec::new();
     add_processors(&mut processors, &system);

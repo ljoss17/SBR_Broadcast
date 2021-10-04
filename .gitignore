@@ -11,3 +11,5 @@ Cargo.lock
 
 # Ignore check folder
 check/
+*.log
+*.txt

@@ -5,6 +5,8 @@ use crossbeam::channel::unbounded;
 use crossbeam::channel::Receiver;
 use crossbeam::channel::Sender;
 use std::collections::HashMap;
+use std::thread;
+use std::time::Duration;
 
 use std::fs::File;
 use std::io::Write;
@@ -157,12 +159,33 @@ impl Processor {
     fn check_echoes(&mut self) {
         if self.echo_messages.len() >= self.echo_thr as usize && self.delivered.is_none() {
             // *** Optional lines used to verify delivery of messages. ***
-            let mut file: File = File::create(format!("check/{}.txt", self.id)).unwrap();
-            let wf = file.write(b"DELIVERED");
-            match wf {
-                Ok(_) => (),
-                Err(err) => println!("ERROR writing delivered file : {}", err),
+            loop {
+                let file = File::create(format!("check/{}.txt", self.id));
+                match file {
+                    Ok(mut f) => {
+                        loop {
+                            println!("CREATED : {}", self.id);
+                            let wf = f.write(b"DELIVERED");
+                            match wf {
+                                Ok(_) => {
+                                    println!("WROTE : {}", self.id);
+                                    break;
+                                }
+                                Err(_) => {
+                                    println!("FAILED WRITE : {}", self.id);
+                                    thread::sleep(Duration::from_secs(1))
+                                }
+                            }
+                        }
+                        break;
+                    }
+                    Err(_) => {
+                        println!("FAILED CREATE : {}", self.id);
+                        thread::sleep(Duration::from_secs(1))
+                    }
+                }
             }
+
             // *** End of optional lines ***
             self.delivered = self.echo.clone();
         }
