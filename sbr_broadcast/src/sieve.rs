@@ -15,7 +15,7 @@ pub fn initialise_sieve(processors: &mut Vec<Processor>, system: &Vec<u32>, e: u
         senders.insert(i, sender.clone());
     }
 
-    // Setup gossip connexions.
+    // Setup echo connexions.
     let mut rng = rand::thread_rng();
     let num_proc = processors.len();
     for p in processors.iter_mut() {
@@ -25,7 +25,7 @@ pub fn initialise_sieve(processors: &mut Vec<Processor>, system: &Vec<u32>, e: u
             let n = rng.gen_range(0..num_proc);
             let random_id: u32 = system[n];
 
-            // Only add if the random processor is new and not self.
+            // Only subscribe if the random processor is new and not self.
             if (random_id != p.id) && (!group.contains(&random_id)) {
                 group.push(random_id);
                 let timestamp: DateTime<Utc> = Utc::now();
@@ -41,7 +41,7 @@ pub fn initialise_sieve(processors: &mut Vec<Processor>, system: &Vec<u32>, e: u
                 senders[&random_id].send(gossip_subscription).unwrap();
             }
 
-            // Stop random selection when the correct amount of processors are in the gossip group.
+            // Stop random selection when the correct amount of processors are in the echo group.
             if group.len() == e as usize {
                 break;
             }

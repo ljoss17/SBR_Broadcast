@@ -30,7 +30,7 @@ pub fn initialise_murmur(processors: &mut Vec<Processor>, system: &Vec<u32>, g: 
             let n = rng.gen_range(0..num_proc);
             let random_id: u32 = system[n];
 
-            // Only add if the random processor is new and not self.
+            // Only subscribe if the random processor is new and not self.
             if (random_id != p.id) && (!group.contains(&random_id)) {
                 group.push(random_id);
                 let timestamp: DateTime<Utc> = Utc::now();

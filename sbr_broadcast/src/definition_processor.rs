@@ -128,7 +128,7 @@ impl Processor {
     /// * Ignore the Message
     /// # Arguments
     ///
-    /// * `msg` - The Message to forward.
+    /// * `msg` - The Message to deliver.
     ///
     fn al_deliver(&mut self, msg: Message) {
         if msg.verify_murmur() && self.murmur_message.is_none() {
@@ -141,12 +141,23 @@ impl Processor {
         }
     }
 
+    /// Send an Echo message.
+    /// # Arguments
+    ///
+    /// * `msg` - The Echo Message to send.
+    /// * `tx` - The target Processor's Sender<Message>.
+    ///
     fn send_echo(&mut self, msg: Message, tx: Sender<Message>) {
         let new_msg = msg.create_forward_echo(self.id);
         tx.send(new_msg).unwrap();
         self.send_counter += 1;
     }
 
+    /// Probabilistic Broadcast Deliver.
+    /// # Arguments
+    ///
+    /// * `msg` - The Message to deliver.
+    ///
     fn pb_deliver(&mut self, msg: Message) {
         if msg.verify_murmur() {
             self.echo = Some(msg.clone());
@@ -156,6 +167,9 @@ impl Processor {
         }
     }
 
+    /// Check if enough Echo messages have been received to trigger the Probabilistic Consistent
+    /// Broadcast Deliver.
+    ///
     fn check_echoes(&mut self) {
         if self.echo_messages.len() >= self.echo_thr as usize && self.delivered.is_none() {
             // *** Optional lines used to verify delivery of messages. ***
@@ -191,6 +205,12 @@ impl Processor {
         }
     }
 
+    /// Verify and deliver an Echo message.
+    /// # Arguments
+    ///
+    /// * `id` - ID of the sending Processor.
+    /// * `nsg` - The Echo Message.
+    ///
     fn deliver_echo(&mut self, id: u32, msg: Message) {
         if !self.echo_messages.contains_key(&id) && msg.verify_murmur() {
             self.echo_messages.insert(id, msg);
@@ -198,6 +218,11 @@ impl Processor {
         self.check_echoes();
     }
 
+    /// Handle received message depending on its type.
+    /// # Arguments
+    ///
+    /// * `msg` - Received Message.
+    ///
     fn handle_message(&mut self, msg: Message) {
         let check_msg: Message = msg.clone();
         match check_msg.message_type {
