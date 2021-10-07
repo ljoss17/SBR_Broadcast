@@ -31,7 +31,6 @@ pub fn initialise_sieve(processors: &mut Vec<Processor>, system: &Vec<u32>, e: u
                 let timestamp: DateTime<Utc> = Utc::now();
                 let gossip_subscription: Message = Message::new(
                     String::from(""),
-                    String::from(""),
                     p.id,
                     p.id,
                     p.get_sender().clone(),

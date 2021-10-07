@@ -1,9 +1,11 @@
 #![crate_name = "sbr_broadcast"]
+mod contagion;
 mod definition_message;
 mod definition_processor;
 mod murmur;
 mod sieve;
 
+use crate::contagion::initialise_contagion;
 use crate::definition_processor::Processor;
 use crate::murmur::{get_sender_gossip, initialise_murmur};
 use crate::sieve::initialise_sieve;
@@ -47,6 +49,38 @@ fn main() {
             return;
         }
     };
+    let r_str = env::args().nth(5).expect("Size of Echo group R.");
+    let r: u32 = match r_str.parse() {
+        Ok(r) => r,
+        Err(_) => {
+            println!("Expected number for fifth argument, got : {}", r_str);
+            return;
+        }
+    };
+    let r_thr_str = env::args().nth(6).expect("Echo threshold R_thr.");
+    let r_thr: u32 = match r_thr_str.parse() {
+        Ok(r_thr) => r_thr,
+        Err(_) => {
+            println!("Expected number for sixth argument, got : {}", r_thr_str);
+            return;
+        }
+    };
+    let d_str = env::args().nth(7).expect("Size of Echo group D.");
+    let d: u32 = match d_str.parse() {
+        Ok(d) => d,
+        Err(_) => {
+            println!("Expected number for seventh argument, got : {}", d_str);
+            return;
+        }
+    };
+    let d_thr_str = env::args().nth(8).expect("Echo threshold D_thr.");
+    let d_thr: u32 = match d_thr_str.parse() {
+        Ok(d_thr) => d_thr,
+        Err(_) => {
+            println!("Expected number for eighth argument, got : {}", d_thr_str);
+            return;
+        }
+    };
 
     let mut system: Vec<u32> = vec![0; n];
     for i in 0..n {
@@ -61,10 +95,13 @@ fn main() {
     initialise_murmur(&mut processors, &system, g);
     println!("Init Sieve");
     initialise_sieve(&mut processors, &system, e, e_thr);
+    println!("Init Contagion");
+    initialise_contagion(&mut processors, &system, r, r_thr, d, d_thr);
 
     let senders = get_sender_gossip(&mut processors, &system, g);
     let mut sender_proc: Processor = Processor::new((n + 1) as u32);
     sender_proc.gossip = senders;
+    println!("WILL broadcast");
     sender_proc.broadcast_murmur(String::from("Test Message"));
 
     loop {
