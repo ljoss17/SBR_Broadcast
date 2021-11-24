@@ -1,84 +1,69 @@
-use crate::definition_message::Message;
-use crate::definition_message::MessageType;
-use crate::definition_processor::Processor;
-use chrono::{DateTime, Utc};
-use crossbeam::channel::Sender;
+use crate::sieve;
 use rand::prelude::*;
-use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
+use talk::broadcast::{BestEffort, BestEffortSettings};
+use talk::crypto::Identity;
+use talk::unicast::{PushSettings, Sender};
 
-/// Update a vector of Processor to link Gossip groups.
-/// # Arguments
-///
-/// * `processors` - A reference to the vector of Processor.
-/// * `system` - A reference to the vector of IDs.
-/// * `g` - A integer which determines the size of the Gossip group for each processor.
-///
-pub fn initialise_murmur(processors: &mut Vec<Processor>, system: &Vec<u32>, g: u32) {
-    // Get Sender channels.
-    let mut senders: HashMap<u32, Sender<Message>> = HashMap::new();
-    for &i in system {
-        let sender: &Sender<Message> = &processors[i as usize].get_sender();
-        senders.insert(i, sender.clone());
-    }
-
-    // Setup gossip connexions.
+pub async fn init(g: u32, sender: Sender<String>, system: Vec<Identity>) -> Vec<Identity> {
     let mut rng = rand::thread_rng();
-    let num_proc = processors.len();
-    for p in processors.iter_mut() {
-        let mut group: Vec<u32> = Vec::new();
-        loop {
-            let n = rng.gen_range(0..num_proc);
-            let random_id: u32 = system[n];
+    let num_proc = system.len();
+    let mut gossip_peers: Vec<Identity> = Vec::new();
+    for _ in 1..=g {
+        let n = rng.gen_range(0..num_proc);
+        gossip_peers.push(system[n].clone());
+        sender
+            .send(system[n].clone(), String::from("GossipSubscription"))
+            .await;
+    }
+    gossip_peers
+}
 
-            // Only subscribe if the random processor is new and not self.
-            if (random_id != p.id) && (!group.contains(&random_id)) {
-                group.push(random_id);
-                let timestamp: DateTime<Utc> = Utc::now();
-                let gossip_subscription: Message = Message::new(
-                    String::from(""),
-                    p.id,
-                    p.id,
-                    p.get_sender().clone(),
-                    timestamp,
-                    MessageType::Gossip,
-                );
-                senders[&random_id].send(gossip_subscription).unwrap();
-            }
+pub async fn deliver_gossip(
+    msg: String,
+    sender: Sender<String>,
+    peers: &Arc<Mutex<Vec<Identity>>>,
+    delivered: &Arc<Mutex<Option<String>>>,
+    echo: &Arc<Mutex<Option<String>>>,
+    echo_peers: &Arc<Mutex<Vec<Identity>>>,
+) {
+    // crypto.verify(msg)
+    dispatch(msg, sender, peers, delivered, echo, echo_peers).await;
+}
 
-            // Stop random selection when the correct amount of processors are in the gossip group.
-            if group.len() == g as usize {
-                break;
-            }
-        }
+pub async fn dispatch(
+    content: String,
+    sender: Sender<String>,
+    peers: &Arc<Mutex<Vec<Identity>>>,
+    delivered: &Arc<Mutex<Option<String>>>,
+    echo: &Arc<Mutex<Option<String>>>,
+    echo_peers: &Arc<Mutex<Vec<Identity>>>,
+) {
+    if delivered.lock().unwrap().is_none() {
+        let mut locked_delivered = delivered.lock().unwrap();
+        *locked_delivered = Some(content.clone());
+        drop(locked_delivered);
+        let settings: BestEffortSettings = BestEffortSettings {
+            push_settings: PushSettings::default(),
+        };
+        let peers: Vec<Identity> = peers.lock().unwrap().clone();
+        let best_effort = BestEffort::new(sender.clone(), peers, content.clone(), settings);
+        best_effort.complete().await;
+        sieve::deliver(content, sender.clone(), echo, echo_peers).await;
     }
 }
 
-/// Get a Gossip group from the list of Processor.
-/// # Arguments
-///
-/// * `processors` - A reference to the vector of Processor.
-/// * `system` - A reference to the vector of IDs.
-/// * `g` - A integer which determines the size of the Gossip group for each processor.
-///
-pub fn get_sender_gossip(
-    processors: &mut Vec<Processor>,
-    system: &Vec<u32>,
-    g: u32,
-) -> Vec<Sender<Message>> {
-    // Get Sender channels.
-    let mut senders: HashMap<u32, Sender<Message>> = HashMap::new();
-    for &i in system {
-        let sender: &Sender<Message> = &processors[i as usize].get_sender();
-        senders.insert(i, sender.clone());
+pub async fn gossip_subscription(
+    node: Sender<String>,
+    from: Identity,
+    gossip_peers: &Arc<Mutex<Vec<Identity>>>,
+    delivered: &Arc<Mutex<Option<String>>>,
+) {
+    let cloned_delivered: Option<String> = delivered.lock().unwrap().clone();
+    if let Some(delivered_msg) = cloned_delivered {
+        node.send(from, delivered_msg.clone()).await;
     }
-    // Create gossip peers for the sender Processor.
-    let mut sender_peers: Vec<Sender<Message>> = Vec::new();
-    let mut rng = rand::thread_rng();
-    let num_proc = processors.len();
-    for _ in 0..g {
-        let n = rng.gen_range(0..num_proc);
-        let random_id: u32 = system[n];
-        sender_peers.push(senders[&random_id].clone());
-    }
-    sender_peers
+    let mut locked_gossip_peers = gossip_peers.lock().unwrap();
+    locked_gossip_peers.push(from);
+    drop(locked_gossip_peers);
 }

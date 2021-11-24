@@ -1,48 +1,97 @@
-use crate::definition_message::Message;
-use crate::definition_message::MessageType;
-use crate::definition_processor::Processor;
-use chrono::{DateTime, Utc};
-use crossbeam::channel::Sender;
-
-use rand::prelude::*;
+use crate::contagion;
+use crate::utils::{build_message_with_type, check_message_occurrences, sample};
 use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
+use talk::broadcast::{BestEffort, BestEffortSettings};
+use talk::crypto::Identity;
+use talk::unicast::{PushSettings, Sender};
 
-pub fn initialise_sieve(processors: &mut Vec<Processor>, system: &Vec<u32>, e: u32, echo_thr: u32) {
-    // Get Sender channels.
-    let mut senders: HashMap<u32, Sender<Message>> = HashMap::new();
-    for &i in system {
-        let sender: &Sender<Message> = &processors[i as usize].get_sender();
-        senders.insert(i, sender.clone());
+pub async fn init(
+    e: u32,
+    system: Vec<Identity>,
+    sender: Sender<String>,
+    echo_peers: &Arc<Mutex<Vec<Identity>>>,
+) {
+    sample(
+        String::from("EchoSubscription"),
+        sender,
+        e,
+        system,
+        echo_peers,
+    )
+    .await;
+}
+
+pub async fn echo_subscription(
+    from: Identity,
+    sender: Sender<String>,
+    echo: &Arc<Mutex<Option<String>>>,
+    echo_peers: &Arc<Mutex<Vec<Identity>>>,
+) {
+    if echo.lock().unwrap().is_some() {
+        let echo_content: String = echo.lock().unwrap().clone().unwrap();
+        let msg: String = build_message_with_type(String::from("Echo"), echo_content);
+        sender.send(from, msg).await;
     }
+    let mut locked_echo_peers = echo_peers.lock().unwrap();
+    locked_echo_peers.push(from);
+    drop(locked_echo_peers);
+}
 
-    // Setup echo connexions.
-    let mut rng = rand::thread_rng();
-    let num_proc = processors.len();
-    for p in processors.iter_mut() {
-        p.echo_thr = echo_thr;
-        let mut group: Vec<u32> = Vec::new();
-        loop {
-            let n = rng.gen_range(0..num_proc);
-            let random_id: u32 = system[n];
+pub async fn deliver(
+    content: String,
+    sender: Sender<String>,
+    echo: &Arc<Mutex<Option<String>>>,
+    echo_peers: &Arc<Mutex<Vec<Identity>>>,
+) {
+    // crypto.verify(msg)
+    let recv_msg = Some(content.clone());
+    let mut locked_echo = echo.lock().unwrap();
+    *locked_echo = recv_msg;
+    drop(locked_echo);
+    let msg: String = build_message_with_type(String::from("Echo"), content);
+    let settings: BestEffortSettings = BestEffortSettings {
+        push_settings: PushSettings::default(),
+    };
+    let echo_peers: Vec<Identity> = echo_peers.lock().unwrap().clone();
+    let best_effort = BestEffort::new(sender, echo_peers, msg.clone(), settings);
+    best_effort.complete().await;
+}
 
-            // Only subscribe if the random processor is new and not self.
-            if (random_id != p.id) && (!group.contains(&random_id)) {
-                group.push(random_id);
-                let timestamp: DateTime<Utc> = Utc::now();
-                let gossip_subscription: Message = Message::new(
-                    String::from(""),
-                    p.id,
-                    p.id,
-                    p.get_sender().clone(),
-                    timestamp,
-                    MessageType::EchoSubscription,
-                );
-                senders[&random_id].send(gossip_subscription).unwrap();
-            }
+pub fn deliver_echo(
+    content: String,
+    from: Identity,
+    replies: &Arc<Mutex<HashMap<Identity, Option<String>>>>,
+) {
+    if replies.lock().unwrap().contains_key(&from) {
+        if replies.lock().unwrap().get(&from).is_none() {
+            let new_reply: Option<String> = Some(content.clone());
+            let mut locked_replies = replies.lock().unwrap();
+            locked_replies.insert(from, new_reply);
+            drop(locked_replies);
+        }
+    }
+}
 
-            // Stop random selection when the correct amount of processors are in the echo group.
-            if group.len() == e as usize {
-                break;
+pub async fn check_echoes(
+    sender: Sender<String>,
+    echo_replies: &Arc<Mutex<HashMap<Identity, Option<String>>>>,
+    delivered_echo: &Arc<Mutex<Option<String>>>,
+    e_thr: usize,
+    ready_peers: &Arc<Mutex<Vec<Identity>>>,
+) {
+    if delivered_echo.lock().unwrap().is_none() {
+        let copy_echo_replies: HashMap<Identity, Option<String>> =
+            echo_replies.lock().unwrap().clone();
+        let occ = check_message_occurrences(copy_echo_replies);
+        for m in occ {
+            if m.1 >= e_thr {
+                let echo = Some(m.0.clone());
+                let mut locked_delivered_echo = delivered_echo.lock().unwrap();
+                *locked_delivered_echo = echo.clone();
+                drop(locked_delivered_echo);
+                contagion::deliver(m.0.clone(), sender, ready_peers).await;
+                return;
             }
         }
     }

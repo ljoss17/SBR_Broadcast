@@ -1,84 +1,155 @@
-use crate::definition_message::Message;
-use crate::definition_message::MessageType;
-use crate::definition_processor::Processor;
-use chrono::{DateTime, Utc};
-use crossbeam::channel::Sender;
+use crate::utils::{build_message_with_type, check_message_occurrences, sample};
 
-use rand::prelude::*;
 use std::collections::HashMap;
+use std::fs::File;
+use std::io::Write;
+use std::sync::{Arc, Mutex};
+use std::thread;
+use std::time::Duration;
+use talk::crypto::Identity;
+use talk::unicast::Sender;
 
-pub fn initialise_contagion(
-    processors: &mut Vec<Processor>,
-    system: &Vec<u32>,
+pub async fn init(
     r: u32,
-    ready_thr: u32,
     d: u32,
-    deliver_thr: u32,
+    system: Vec<Identity>,
+    sender: Sender<String>,
+    ready_peers: &Arc<Mutex<Vec<Identity>>>,
+    delivery_peers: &Arc<Mutex<Vec<Identity>>>,
 ) {
-    // Get Sender channels.
-    let mut senders: HashMap<u32, Sender<Message>> = HashMap::new();
-    for &i in system {
-        let sender: &Sender<Message> = &processors[i as usize].get_sender();
-        senders.insert(i, sender.clone());
+    sample(
+        String::from("EchoSubscription"),
+        sender.clone(),
+        r,
+        system.clone(),
+        ready_peers,
+    )
+    .await;
+    sample(
+        String::from("EchoSubscription"),
+        sender.clone(),
+        d,
+        system.clone(),
+        delivery_peers,
+    )
+    .await;
+}
+
+pub async fn ready_subscription(
+    ready_messages: Vec<String>,
+    from: Identity,
+    sender: Sender<String>,
+    ready_peers: &Arc<Mutex<Vec<Identity>>>,
+) {
+    for msg in ready_messages.into_iter() {
+        sender.send(from, msg).await;
     }
+    let mut locked_ready_peers = ready_peers.lock().unwrap();
+    locked_ready_peers.push(from);
+    drop(locked_ready_peers);
+}
 
-    // Setup contagion connexions.
-    let mut rng = rand::thread_rng();
-    let num_proc = processors.len();
-    for p in processors.iter_mut() {
-        p.ready_thr = ready_thr;
-        p.deliver_thr = deliver_thr;
-        let mut group_rdy: Vec<u32> = Vec::new();
-        // Setup Ready links.
-        loop {
-            let n = rng.gen_range(0..num_proc);
-            let random_id: u32 = system[n];
+pub async fn deliver(
+    content: String,
+    sender: Sender<String>,
+    ready_peers: &Arc<Mutex<Vec<Identity>>>,
+) {
+    // crypto.verify(msg)
+    let copy_ready_peers: Vec<Identity> = ready_peers.lock().unwrap().clone();
+    for r in copy_ready_peers.into_iter() {
+        let msg: String = build_message_with_type(String::from("Ready"), content.clone());
+        sender.send(r.clone(), msg).await;
+    }
+}
 
-            // Only subscribe if the random processor is new and not self.
-            if (random_id != p.id) && (!group_rdy.contains(&random_id)) {
-                group_rdy.push(random_id);
-                let timestamp: DateTime<Utc> = Utc::now();
-                let gossip_subscription: Message = Message::new(
-                    String::from(""),
-                    p.id,
-                    p.id,
-                    p.get_sender().clone(),
-                    timestamp,
-                    MessageType::ReadySubscription,
-                );
-                senders[&random_id].send(gossip_subscription).unwrap();
-            }
+pub fn deliver_ready(
+    content: String,
+    from: Identity,
+    ready_peers: &Arc<Mutex<Vec<Identity>>>,
+    delivery_peers: &Arc<Mutex<Vec<Identity>>>,
+    ready_replies: &Arc<Mutex<HashMap<Identity, Option<String>>>>,
+    delivery_replies: &Arc<Mutex<HashMap<Identity, Option<String>>>>,
+) {
+    let new_reply: Option<String> = Some(content.clone());
+    // crypto.verify(msg)
+    if ready_peers.lock().unwrap().contains(&from) {
+        let locked_ready_replies = ready_replies.lock().unwrap();
+        locked_ready_replies.insert(from, new_reply.clone());
+        drop(locked_ready_replies);
+    }
+    if delivery_peers.lock().unwrap().contains(&from) {
+        let locked_delivery_replies = delivery_replies.lock().unwrap();
+        locked_delivery_replies.insert(from, new_reply.clone());
+        drop(locked_delivery_replies);
+    }
+}
 
-            // Stop random selection when the correct amount of processors are in the echo group.
-            if group_rdy.len() == r as usize {
-                break;
+async fn check_ready(
+    sender: Sender<String>,
+    ready_replies: Arc<Mutex<HashMap<Identity, Option<String>>>>,
+    ready_messages: Arc<Mutex<Vec<String>>>,
+    r_thr: usize,
+    ready_peers: Arc<Mutex<Vec<Identity>>>,
+) {
+    let cloned_ready_replies: HashMap<Identity, Option<String>> =
+        ready_replies.lock().unwrap().clone();
+    let occ = check_message_occurrences(cloned_ready_replies);
+    for m in occ {
+        if m.1 >= r_thr {
+            let mut locked_ready_replies = ready_messages.lock().unwrap();
+            locked_ready_replies.push(m.0.clone());
+            drop(locked_ready_replies);
+            let cloned_ready_peers: Vec<Identity> = ready_peers.lock().unwrap().clone();
+            for r in cloned_ready_peers.into_iter() {
+                let msg: String = build_message_with_type(String::from("Ready"), m.0.clone());
+                sender.send(r.clone(), msg).await;
             }
         }
-        let mut group_del: Vec<u32> = Vec::new();
-        // Setup Deliver links.
-        loop {
-            let n = rng.gen_range(0..num_proc);
-            let random_id: u32 = system[n];
+    }
+}
 
-            // Only subscribe if the random processor is new and not self.
-            if (random_id != p.id) && (!group_del.contains(&random_id)) {
-                group_del.push(random_id);
-                let timestamp: DateTime<Utc> = Utc::now();
-                let gossip_subscription: Message = Message::new(
-                    String::from(""),
-                    p.id,
-                    p.id,
-                    p.get_sender().clone(),
-                    timestamp,
-                    MessageType::DeliverySubscription,
-                );
-                senders[&random_id].send(gossip_subscription).unwrap();
+fn check_delivery(
+    delivery_replies: Arc<Mutex<HashMap<Identity, Option<String>>>>,
+    d_thr: usize,
+    delivered: Arc<Mutex<Option<String>>>,
+) {
+    if delivered.lock().unwrap().is_none() {
+        let cloned_delivery_replies: HashMap<Identity, Option<String>> =
+            delivery_replies.lock().unwrap().clone();
+        let occ = check_message_occurrences(cloned_delivery_replies);
+        for m in occ {
+            if m.1 >= d_thr {
+                let msg: Option<String> = Some(m.0.clone());
+                let locked_delivered = delivered.lock().unwrap();
+                *locked_delivered = msg.clone();
+                drop(locked_delivered);
+                prb_deliver(m.0.clone());
             }
+        }
+    }
+}
 
-            // Stop random selection when the correct amount of processors are in the echo group.
-            if group_del.len() == d as usize {
-                break;
+pub fn prb_deliver(content: String) {
+    // *** Optional lines used to verify delivery of messages. ***
+    loop {
+        let file = File::create(format!("check/tmp.txt"));
+        match file {
+            Ok(mut f) => {
+                loop {
+                    write!(f, "DELIVERED : {}", content);
+                    /*
+                    let wf = f.write(b"DELIVERED");
+                    match wf {
+                        Ok(_) => {
+                            break;
+                        }
+                        Err(_) => thread::sleep(Duration::from_secs(1)),
+                    }
+                    */
+                }
+                //break;
             }
+            Err(_) => thread::sleep(Duration::from_secs(1)),
         }
     }
 }

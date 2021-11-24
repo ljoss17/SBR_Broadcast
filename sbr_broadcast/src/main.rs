@@ -3,12 +3,12 @@ mod contagion;
 mod definition_message;
 mod definition_processor;
 mod murmur;
+mod node;
+mod peer;
 mod sieve;
+mod utils;
 
-use crate::contagion::initialise_contagion;
 use crate::definition_processor::Processor;
-use crate::murmur::{get_sender_gossip, initialise_murmur};
-use crate::sieve::initialise_sieve;
 use std::env;
 use std::thread;
 use std::time::Duration;
@@ -85,27 +85,6 @@ fn main() {
     let mut system: Vec<u32> = vec![0; n];
     for i in 0..n {
         system[i] = i as u32;
-    }
-
-    let mut processors: Vec<Processor> = Vec::new();
-    add_processors(&mut processors, &system);
-
-    spawn_processors(&mut processors);
-    println!("Init Murmur");
-    initialise_murmur(&mut processors, &system, g);
-    println!("Init Sieve");
-    initialise_sieve(&mut processors, &system, e, e_thr);
-    println!("Init Contagion");
-    initialise_contagion(&mut processors, &system, r, r_thr, d, d_thr);
-
-    let senders = get_sender_gossip(&mut processors, &system, g);
-    let mut sender_proc: Processor = Processor::new((n + 1) as u32);
-    sender_proc.gossip = senders;
-    println!("WILL broadcast");
-    sender_proc.broadcast_murmur(String::from("Test Message"));
-
-    loop {
-        thread::sleep(Duration::from_secs(1));
     }
 }
 
