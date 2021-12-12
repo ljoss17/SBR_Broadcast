@@ -10,5 +10,10 @@ edition = "2018"
 rand = "0.8.4"
 chrono = "0.4"
 crossbeam = "0.7.3"
-tokio = { version = "1", features = ["full"] }
+
+tokio = { version = "1.12.0", features = [ "macros", "net", "rt-multi-thread", "io-util", "sync", "time" ] }
+
+serde = { version = "~1.0", features = [ "derive" ] }
 talk = { git = "https://github.com/Distributed-EPFL/talk" }
+
+futures = { version = "0.3" }
