@@ -9,7 +9,7 @@ use talk::unicast::{Receiver, Sender};
 use tokio::sync::Mutex;
 
 pub struct Node {
-    id: usize,
+    pub id: usize,
     pub gossip_peers: Arc<Mutex<Vec<Identity>>>,
     pub echo_peers: Arc<Mutex<Vec<Identity>>>,
     ready_peers: Arc<Mutex<Vec<Identity>>>,
@@ -54,35 +54,24 @@ impl Node {
 
     pub async fn listen(self, sender: Sender<Message>, receiver: &mut Receiver<Message>) {
         loop {
-            //println!("<{}> WAITING FOR MESSAGE", self.id.clone());
             let (identity, raw_message, _) = receiver.receive().await;
-            /*println!(
-                "<{}> WILL PROCESS MESSAGE : {} of type {}",
-                self.id.clone(),
-                raw_message.content.clone(),
-                raw_message.message_type,
-            );*/
             let message: Message = raw_message.into();
-            /*println!(
-                "<{}> GOT : {}, FROM : <{:#?}>",
-                self.id, message.content, identity
-            );*/
 
             let msg_type = message.message_type.clone();
             match msg_type {
                 // Gossip
                 0 => {
-                    let gp = self.gossip_peers.clone();
+                    let gp = self.gossip_peers.lock().await.clone();
                     let dg = self.delivered_gossip.clone();
                     let ec = self.echo.clone();
-                    let ep = self.echo_peers.clone();
+                    let ep = self.echo_peers.lock().await.clone();
                     let m = message.clone();
                     let s = sender.clone();
                     tokio::spawn(async move { deliver_gossip(m, s, gp, dg, ec, ep).await });
                 }
                 // Echo
                 1 => {
-                    let rp = self.ready_peers.clone();
+                    let rp = self.ready_peers.lock().await.clone();
                     let de = self.delivered_echo.clone();
                     let er = self.echo_replies.clone();
                     let ethr = self.echo_threshold.clone();
@@ -94,7 +83,7 @@ impl Node {
                 }
                 // Ready
                 2 => {
-                    let rp = self.ready_peers.clone();
+                    let rp = self.ready_peers.lock().await.clone();
                     let rr = self.ready_replies.clone();
                     let dr = self.delivery_replies.clone();
                     let rm = self.ready_messages.clone();
@@ -111,14 +100,14 @@ impl Node {
                 // GossipSubscription
                 3 => {
                     let gp = self.gossip_peers.clone();
-                    let dm = self.delivered_msg.clone();
+                    let dm = self.delivered_msg.lock().await.clone();
                     let s = sender.clone();
                     tokio::spawn(async move { gossip_subscription(s, identity, gp, dm).await });
                 }
                 // EchoSubscription
                 4 => {
                     let s = sender.clone();
-                    let ec = self.echo.clone();
+                    let ec = self.echo.lock().await.clone();
                     let ep = self.echo_peers.clone();
 
                     tokio::spawn(async move { echo_subscription(s, identity, ec, ep).await });
@@ -126,10 +115,11 @@ impl Node {
                 // ReadySubscription
                 5 => {
                     let s = sender.clone();
-                    let rm = self.ready_messages.clone();
+                    let rm = self.ready_messages.lock().await.clone();
                     let rp = self.ready_peers.clone();
+                    let id = self.id.clone();
 
-                    tokio::spawn(async move { ready_subscription(s, identity, rm, rp).await });
+                    tokio::spawn(async move { ready_subscription(id, s, identity, rm, rp).await });
                 }
                 // Send gossip Subscriptions
                 6 => {
@@ -152,8 +142,9 @@ impl Node {
                     let tokio_sender = sender.clone();
                     let r_replies = self.ready_replies.lock().await.clone();
                     let d_replies = self.delivery_replies.lock().await.clone();
+                    let id = self.id.clone();
                     tokio::spawn(async move {
-                        ready_subscribe(tokio_sender, r_replies, d_replies).await;
+                        ready_subscribe(id, tokio_sender, r_replies, d_replies).await;
                     });
                 }
                 // Not valid

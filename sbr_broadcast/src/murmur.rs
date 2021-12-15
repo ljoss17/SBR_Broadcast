@@ -34,7 +34,7 @@ pub async fn init(g: usize, system: Vec<KeyCard>, gossip_peers: &Arc<Mutex<Vec<I
 
 pub async fn gossip_subscribe(node_sender: Sender<Message>, gossip_peers: Vec<Identity>) {
     let push_settings = PushSettings {
-        stop_condition: Acknowledgement::Weak,
+        stop_condition: Acknowledgement::Strong,
         retry_schedule: Arc::new(CappedExponential::new(
             Duration::from_secs(1),
             2.,
@@ -66,10 +66,10 @@ pub async fn gossip_subscribe(node_sender: Sender<Message>, gossip_peers: Vec<Id
 pub async fn deliver_gossip(
     content: Message,
     node_sender: Sender<Message>,
-    gossip_peers: Arc<Mutex<Vec<Identity>>>,
+    gossip_peers: Vec<Identity>,
     delivered_gossip: Arc<Mutex<Option<Message>>>,
     echo: Arc<Mutex<Option<Message>>>,
-    echo_peers: Arc<Mutex<Vec<Identity>>>,
+    echo_peers: Vec<Identity>,
 ) {
     // crypto.verify(msg)
     dispatch(
@@ -98,10 +98,10 @@ pub async fn deliver_gossip(
 pub async fn dispatch(
     content: Message,
     node_sender: Sender<Message>,
-    peers: Arc<Mutex<Vec<Identity>>>,
+    peers: Vec<Identity>,
     delivered_gossip: Arc<Mutex<Option<Message>>>,
     echo: Arc<Mutex<Option<Message>>>,
-    echo_peers: Arc<Mutex<Vec<Identity>>>,
+    echo_peers: Vec<Identity>,
 ) {
     if delivered_gossip.lock().await.is_none() {
         let mut locked_delivered = delivered_gossip.lock().await;
@@ -116,15 +116,9 @@ pub async fn dispatch(
             )),
         };
         let settings: BestEffortSettings = BestEffortSettings { push_settings };
-        let cp_peers: Vec<Identity> = peers.lock().await.clone();
-        let best_effort = BestEffort::new(
-            node_sender.clone(),
-            cp_peers.clone(),
-            content.clone(),
-            settings,
-        );
+        let best_effort = BestEffort::new(node_sender.clone(), peers, content.clone(), settings);
         best_effort.complete().await;
-        sieve::deliver(content, node_sender, &echo, &echo_peers).await;
+        sieve::deliver(content, node_sender, echo, echo_peers).await;
     }
 }
 
@@ -142,10 +136,9 @@ pub async fn gossip_subscription(
     node_sender: Sender<Message>,
     from: Identity,
     gossip_peers: Arc<Mutex<Vec<Identity>>>,
-    delivered_gossip: Arc<Mutex<Option<Message>>>,
+    delivered_gossip: Option<Message>,
 ) {
-    let cloned_delivered: Option<Message> = delivered_gossip.lock().await.clone();
-    if let Some(delivered_msg) = cloned_delivered {
+    if let Some(delivered_msg) = delivered_gossip {
         let r = node_sender.send(from, delivered_msg.clone()).await;
         match r {
             Ok(_) => {}

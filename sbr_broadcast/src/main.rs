@@ -1,4 +1,7 @@
 #![crate_name = "sbr_broadcast"]
+
+#[macro_use]
+mod my_macros;
 mod contagion;
 mod message;
 mod murmur;
@@ -131,7 +134,7 @@ async fn run_sender(g: usize) {
 
     let keycards = client.get_shard(0).await.unwrap();
 
-    tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+    tokio::time::sleep(std::time::Duration::from_secs(120)).await;
 
     let mut peers: Vec<Identity> = vec![];
     let num_proc = keycards.clone().len();
@@ -211,7 +214,6 @@ async fn setup_node(
     )
     .await;
     tokio::spawn(test(node_keychain.keycard(), i));
-    //println!("<{}> WILL LISTEN", i);
     node.listen(sender, &mut receiver).await;
 }
 

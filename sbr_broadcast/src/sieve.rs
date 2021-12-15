@@ -33,7 +33,7 @@ pub async fn echo_subscribe(
     echo_replies: HashMap<Identity, Option<Message>>,
 ) {
     let push_settings = PushSettings {
-        stop_condition: Acknowledgement::Weak,
+        stop_condition: Acknowledgement::Strong,
         retry_schedule: Arc::new(CappedExponential::new(
             Duration::from_secs(1),
             2.,
@@ -60,11 +60,11 @@ pub async fn echo_subscribe(
 pub async fn echo_subscription(
     node_sender: Sender<Message>,
     from: Identity,
-    delivered_echo: Arc<Mutex<Option<Message>>>,
+    delivered_echo: Option<Message>,
     echo_peers: Arc<Mutex<Vec<Identity>>>,
 ) {
-    if delivered_echo.lock().await.is_some() {
-        let echo_content: Message = delivered_echo.lock().await.clone().unwrap();
+    if delivered_echo.is_some() {
+        let echo_content: Message = delivered_echo.unwrap();
         let msg: Message = Message::new(1, echo_content.content.clone());
         let r = node_sender.send(from, msg).await;
         match r {
@@ -92,8 +92,8 @@ pub async fn echo_subscription(
 pub async fn deliver(
     content: Message,
     node_sender: Sender<Message>,
-    delivered_echo: &Arc<Mutex<Option<Message>>>,
-    echo_peers: &Arc<Mutex<Vec<Identity>>>,
+    delivered_echo: Arc<Mutex<Option<Message>>>,
+    echo_peers: Vec<Identity>,
 ) {
     // crypto.verify(msg)
     let recv_msg = Some(content.clone());
@@ -102,7 +102,7 @@ pub async fn deliver(
     drop(locked_echo);
     let msg: Message = Message::new(1, content.content.clone());
     let push_settings = PushSettings {
-        stop_condition: Acknowledgement::Weak,
+        stop_condition: Acknowledgement::Strong,
         retry_schedule: Arc::new(CappedExponential::new(
             Duration::from_secs(1),
             2.,
@@ -110,7 +110,6 @@ pub async fn deliver(
         )),
     };
     let settings: BestEffortSettings = BestEffortSettings { push_settings };
-    let echo_peers: Vec<Identity> = echo_peers.lock().await.clone();
     let best_effort = BestEffort::new(node_sender.clone(), echo_peers, msg.clone(), settings);
     best_effort.complete().await;
 }
@@ -131,7 +130,7 @@ pub async fn deliver_echo(
     node_sender: Sender<Message>,
     delivered_echo: Arc<Mutex<Option<Message>>>,
     e_thr: usize,
-    ready_peers: Arc<Mutex<Vec<Identity>>>,
+    ready_peers: Vec<Identity>,
 ) {
     if echo_replies.lock().await.contains_key(&from) {
         if echo_replies.lock().await.get(&from).unwrap().is_none() {
@@ -141,6 +140,7 @@ pub async fn deliver_echo(
             drop(locked_replies);
         }
     }
+    let echo_replies: HashMap<Identity, Option<Message>> = echo_replies.lock().await.clone();
     check_echoes(
         node_sender,
         delivered_echo,
@@ -166,13 +166,11 @@ pub async fn check_echoes(
     node_sender: Sender<Message>,
     delivered_echo: Arc<Mutex<Option<Message>>>,
     e_thr: usize,
-    ready_peers: Arc<Mutex<Vec<Identity>>>,
-    echo_replies: Arc<Mutex<HashMap<Identity, Option<Message>>>>,
+    ready_peers: Vec<Identity>,
+    echo_replies: HashMap<Identity, Option<Message>>,
 ) {
     if delivered_echo.lock().await.is_none() {
-        let copy_echo_replies: HashMap<Identity, Option<Message>> =
-            echo_replies.lock().await.clone();
-        let occ = check_message_occurrences(copy_echo_replies);
+        let occ = check_message_occurrences(echo_replies);
         for m in occ {
             if m.1 >= e_thr {
                 let msg = Message::new(1, m.0.clone());
