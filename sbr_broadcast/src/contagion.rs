@@ -1,4 +1,5 @@
-use crate::message::Message;
+use crate::message::{Message, SignedMessage};
+use crate::message_headers::{Ready, ReadySubscription};
 use crate::utils::{check_message_occurrences, sample};
 use std::collections::HashMap;
 use std::fs::File;
@@ -6,7 +7,7 @@ use std::io::Write;
 use std::sync::Arc;
 use std::time::Duration;
 use talk::broadcast::{BestEffort, BestEffortSettings};
-use talk::crypto::{Identity, KeyCard};
+use talk::crypto::{Identity, KeyCard, KeyChain};
 use talk::time::sleep_schedules::CappedExponential;
 use talk::unicast::{Acknowledgement, PushSettings, Sender};
 use tokio::sync::Mutex;
@@ -35,8 +36,8 @@ pub async fn init(
 }
 
 pub async fn ready_subscribe(
-    id: usize,
-    node_sender: Sender<Message>,
+    keychain: KeyChain,
+    node_sender: Sender<SignedMessage>,
     ready_replies: HashMap<Identity, Option<Message>>,
     delivery_replies: HashMap<Identity, Option<Message>>,
 ) {
@@ -52,26 +53,18 @@ pub async fn ready_subscribe(
     let mut peers_ready: Vec<Identity> = ready_replies.into_keys().collect();
     let mut peers_delivery: Vec<Identity> = delivery_replies.into_keys().collect();
     peers_ready.append(&mut peers_delivery);
-    println!("{} : RP : {}", id, peers_ready.len());
     let msg = Message::new(5, String::from("ReadySubscription"));
+    let signature = keychain.sign(&ReadySubscription(msg.clone())).unwrap();
+    let signed_msg = SignedMessage::new(msg, signature);
     let best_effort = BestEffort::new(
         node_sender.clone(),
         peers_ready,
-        msg.clone(),
-        settings.clone(),
-    );
-    println!("{} - finished ReadySubscription Broadcast", id);
-    best_effort.complete().await;
-    /*let msg = Message::new(5, String::from("DeliverySubscription"));
-    let best_effort = BestEffort::new(
-        node_sender.clone(),
-        peers_delivery,
-        msg.clone(),
+        signed_msg,
         settings.clone(),
     );
     best_effort.complete().await;
-    println!("{} - finished DeliverySubscription Broadcast", id);*/
 }
+
 /// Deliver a ReadySubscription type message. Send all the messages which are ready to the subscribing Node.
 ///
 /// # Arguments
@@ -82,17 +75,17 @@ pub async fn ready_subscribe(
 /// * `ready_peers` - The Atomic Reference Counter the Ready peers to update.
 ///
 pub async fn ready_subscription(
+    keychain: KeyChain,
     id: usize,
-    node_sender: Sender<Message>,
+    node_sender: Sender<SignedMessage>,
     from: Identity,
     ready_messages: Vec<Message>,
     ready_peers: Arc<Mutex<Vec<Identity>>>,
 ) {
-    println!("{} Got a ReadySubscription", id);
     for msg in ready_messages.into_iter() {
-        println!("{} - Will send {:?}", id, msg);
-        let r = node_sender.send(from, msg.clone()).await;
-        println!("{} - Has sent {:?}", id, msg);
+        let signature = keychain.sign(&Ready(msg.clone())).unwrap();
+        let signed_msg = SignedMessage::new(msg.clone(), signature);
+        let r = node_sender.send(from, signed_msg).await;
         match r {
             Ok(_) => {}
             Err(e) => {
@@ -114,11 +107,18 @@ pub async fn ready_subscription(
 /// * `node_sender` - The Node's Sender used to send the Gossip Subscription to the peers.
 /// * `ready_peers` - The Atomic Reference Counter the Ready peers.
 ///
-pub async fn deliver(content: Message, node_sender: Sender<Message>, ready_peers: Vec<Identity>) {
+pub async fn deliver(
+    keychain: KeyChain,
+    content: Message,
+    node_sender: Sender<SignedMessage>,
+    ready_peers: Vec<Identity>,
+) {
     // crypto.verify(msg)
     for r in ready_peers.into_iter() {
         let msg: Message = Message::new(2, content.content.clone());
-        let r = node_sender.send(r.clone(), msg).await;
+        let signature = keychain.sign(&Ready(msg.clone())).unwrap();
+        let signed_msg = SignedMessage::new(msg, signature);
+        let r = node_sender.send(r.clone(), signed_msg).await;
         match r {
             Ok(_) => {}
             Err(e) => {
@@ -141,47 +141,56 @@ pub async fn deliver(content: Message, node_sender: Sender<Message>, ready_peers
 /// * `delivery_replies` - The Atomic Reference Counter to the Delivery replies from the chosen peers.
 ///
 pub async fn deliver_ready(
+    keychain: KeyChain,
+    kc: KeyCard,
     id: usize,
-    content: Message,
+    signed_msg: SignedMessage,
     from: Identity,
     ready_peers: Vec<Identity>,
     ready_replies: Arc<Mutex<HashMap<Identity, Option<Message>>>>,
     delivery_replies: Arc<Mutex<HashMap<Identity, Option<Message>>>>,
-    node_sender: Sender<Message>,
+    node_sender: Sender<SignedMessage>,
     ready_messages: Arc<Mutex<Vec<Message>>>,
     r_thr: usize,
     d_thr: usize,
     delivered: Arc<Mutex<Option<Message>>>,
 ) {
-    let new_reply: Option<Message> = Some(content.clone());
-    // crypto.verify(msg)
-    let rp: Vec<Identity> = ready_replies.lock().await.clone().into_keys().collect();
-    if rp.contains(&from) {
-        drop(rp);
-        let mut locked_ready_replies = ready_replies.lock().await;
-        locked_ready_replies.insert(from, new_reply.clone());
-        drop(locked_ready_replies);
-        let ready_replies: HashMap<Identity, Option<Message>> = ready_replies.lock().await.clone();
-        tokio::spawn(async move {
-            check_ready(
-                node_sender,
-                ready_messages,
-                r_thr,
-                ready_peers,
-                ready_replies,
-            )
-            .await;
-        });
-    }
-    let dp: Vec<Identity> = delivery_replies.lock().await.clone().into_keys().collect();
-    if dp.contains(&from) {
-        drop(dp);
-        let mut locked_delivery_replies = delivery_replies.lock().await;
-        locked_delivery_replies.insert(from, new_reply.clone());
-        drop(locked_delivery_replies);
-        let delivery_replies: HashMap<Identity, Option<Message>> =
-            delivery_replies.lock().await.clone();
-        check_delivery(id, d_thr, delivered, delivery_replies).await;
+    let correct = signed_msg
+        .clone()
+        .get_signature()
+        .verify(&kc, &Ready(signed_msg.clone().get_message()));
+    if correct.is_ok() {
+        let rp: Vec<Identity> = ready_replies.lock().await.clone().into_keys().collect();
+        let new_reply: Option<Message> = Some(signed_msg.clone().get_message());
+        if rp.contains(&from) {
+            drop(rp);
+            let mut locked_ready_replies = ready_replies.lock().await;
+            locked_ready_replies.insert(from, new_reply.clone());
+            drop(locked_ready_replies);
+            let ready_replies: HashMap<Identity, Option<Message>> =
+                ready_replies.lock().await.clone();
+            tokio::spawn(async move {
+                check_ready(
+                    keychain,
+                    node_sender,
+                    ready_messages,
+                    r_thr,
+                    ready_peers,
+                    ready_replies,
+                )
+                .await;
+            });
+        }
+        let dp: Vec<Identity> = delivery_replies.lock().await.clone().into_keys().collect();
+        if dp.contains(&from) {
+            drop(dp);
+            let mut locked_delivery_replies = delivery_replies.lock().await;
+            locked_delivery_replies.insert(from, new_reply.clone());
+            drop(locked_delivery_replies);
+            let delivery_replies: HashMap<Identity, Option<Message>> =
+                delivery_replies.lock().await.clone();
+            check_delivery(id, d_thr, delivered, delivery_replies).await;
+        }
     }
 }
 
@@ -197,7 +206,8 @@ pub async fn deliver_ready(
 /// * `ready_replies` - The Atomic Reference Counter to the Ready replies from the chosen peers.
 ///
 async fn check_ready(
-    node_sender: Sender<Message>,
+    keychain: KeyChain,
+    node_sender: Sender<SignedMessage>,
     ready_messages: Arc<Mutex<Vec<Message>>>,
     r_thr: usize,
     ready_peers: Vec<Identity>,
@@ -207,6 +217,7 @@ async fn check_ready(
     for m in occ {
         if m.1 >= r_thr {
             let msg = Message::new(2, m.0.clone());
+            let signature = keychain.sign(&Ready(msg.clone())).unwrap();
             let mut locked_ready_replies = ready_messages.lock().await;
             locked_ready_replies.push(msg.clone());
             drop(locked_ready_replies);
@@ -219,11 +230,12 @@ async fn check_ready(
                     Duration::from_secs(10),
                 )),
             };
+            let signed_msg = SignedMessage::new(msg, signature);
             let settings: BestEffortSettings = BestEffortSettings { push_settings };
             let best_effort = BestEffort::new(
                 node_sender.clone(),
                 ready_peers.clone(),
-                msg.clone(),
+                signed_msg.clone(),
                 settings.clone(),
             );
             best_effort.complete().await;
@@ -257,9 +269,6 @@ async fn check_delivery(
                 let msg: Option<Message> = Some(msg);
                 *locked_delivered = msg.clone();
                 drop(locked_delivered);
-                {
-                    my_print!(format!("{} updated delivered field", id));
-                }
                 prb_deliver(m.0.clone(), id.to_string()).await;
                 break;
             }
@@ -299,5 +308,4 @@ pub async fn prb_deliver(content: String, uid: String) {
             }
         }
     }
-    my_print!(format!("{} finished delivering", uid));
 }

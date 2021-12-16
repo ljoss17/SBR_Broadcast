@@ -1,14 +1,16 @@
 use crate::contagion::{deliver_ready, ready_subscribe, ready_subscription};
-use crate::message::Message;
+use crate::message::{Message, SignedMessage};
 use crate::murmur::{deliver_gossip, gossip_subscribe, gossip_subscription};
 use crate::sieve::{deliver_echo, echo_subscribe, echo_subscription};
 use std::collections::HashMap;
 use std::sync::Arc;
-use talk::crypto::Identity;
+use talk::crypto::{Identity, KeyCard, KeyChain};
 use talk::unicast::{Receiver, Sender};
 use tokio::sync::Mutex;
 
 pub struct Node {
+    kc: KeyChain,
+    keycards: HashMap<Identity, KeyCard>,
     pub id: usize,
     pub gossip_peers: Arc<Mutex<Vec<Identity>>>,
     pub echo_peers: Arc<Mutex<Vec<Identity>>>,
@@ -28,12 +30,16 @@ pub struct Node {
 
 impl Node {
     pub fn new(
+        kc: KeyChain,
+        keycards: HashMap<Identity, KeyCard>,
         id: usize,
         echo_threshold: usize,
         ready_threshold: usize,
         delivery_threshold: usize,
     ) -> Self {
         Node {
+            kc,
+            keycards,
             id,
             gossip_peers: Arc::new(Mutex::new(Vec::new())),
             echo_peers: Arc::new(Mutex::new(Vec::new())),
@@ -52,12 +58,16 @@ impl Node {
         }
     }
 
-    pub async fn listen(self, sender: Sender<Message>, receiver: &mut Receiver<Message>) {
+    pub async fn listen(
+        self,
+        sender: Sender<SignedMessage>,
+        receiver: &mut Receiver<SignedMessage>,
+    ) {
         loop {
             let (identity, raw_message, _) = receiver.receive().await;
-            let message: Message = raw_message.into();
+            let message: SignedMessage = raw_message;
 
-            let msg_type = message.message_type.clone();
+            let msg_type = message.clone().get_type();
             match msg_type {
                 // Gossip
                 0 => {
@@ -67,7 +77,11 @@ impl Node {
                     let ep = self.echo_peers.lock().await.clone();
                     let m = message.clone();
                     let s = sender.clone();
-                    tokio::spawn(async move { deliver_gossip(m, s, gp, dg, ec, ep).await });
+                    let kc = self.keycards[&identity].clone();
+                    let keychain = self.kc.clone();
+                    tokio::spawn(async move {
+                        deliver_gossip(keychain, kc, m, s, gp, dg, ec, ep).await
+                    });
                 }
                 // Echo
                 1 => {
@@ -75,11 +89,12 @@ impl Node {
                     let de = self.delivered_echo.clone();
                     let er = self.echo_replies.clone();
                     let ethr = self.echo_threshold.clone();
-                    let m = message.clone();
+                    let m = message.clone().get_message();
                     let s = sender.clone();
-                    tokio::spawn(
-                        async move { deliver_echo(m, identity, er, s, de, ethr, rp).await },
-                    );
+                    let keychain = self.kc.clone();
+                    tokio::spawn(async move {
+                        deliver_echo(keychain, m, identity, er, s, de, ethr, rp).await
+                    });
                 }
                 // Ready
                 2 => {
@@ -93,8 +108,13 @@ impl Node {
                     let m = message.clone();
                     let s = sender.clone();
                     let id = self.id.clone();
+                    let keychain = self.kc.clone();
+                    let kc = self.keycards[&identity].clone();
                     tokio::spawn(async move {
-                        deliver_ready(id, m, identity, rp, rr, dr, s, rm, rthr, dthr, dm).await
+                        deliver_ready(
+                            keychain, kc, id, m, identity, rp, rr, dr, s, rm, rthr, dthr, dm,
+                        )
+                        .await
                     });
                 }
                 // GossipSubscription
@@ -102,15 +122,21 @@ impl Node {
                     let gp = self.gossip_peers.clone();
                     let dm = self.delivered_msg.lock().await.clone();
                     let s = sender.clone();
-                    tokio::spawn(async move { gossip_subscription(s, identity, gp, dm).await });
+                    let keychain = self.kc.clone();
+                    tokio::spawn(async move {
+                        gossip_subscription(keychain, s, identity, gp, dm).await
+                    });
                 }
                 // EchoSubscription
                 4 => {
                     let s = sender.clone();
                     let ec = self.echo.lock().await.clone();
                     let ep = self.echo_peers.clone();
+                    let keychain = self.kc.clone();
 
-                    tokio::spawn(async move { echo_subscription(s, identity, ec, ep).await });
+                    tokio::spawn(
+                        async move { echo_subscription(keychain, s, identity, ec, ep).await },
+                    );
                 }
                 // ReadySubscription
                 5 => {
@@ -118,33 +144,37 @@ impl Node {
                     let rm = self.ready_messages.lock().await.clone();
                     let rp = self.ready_peers.clone();
                     let id = self.id.clone();
-
-                    tokio::spawn(async move { ready_subscription(id, s, identity, rm, rp).await });
+                    let keychain = self.kc.clone();
+                    tokio::spawn(async move {
+                        ready_subscription(keychain, id, s, identity, rm, rp).await
+                    });
                 }
-                // Send gossip Subscriptions
+                // Send Gossip Subscriptions
                 6 => {
                     let tokio_sender = sender.clone();
                     let peers = self.gossip_peers.lock().await.clone();
+                    let keychain = self.kc.clone();
                     tokio::spawn(async move {
-                        gossip_subscribe(tokio_sender, peers).await;
+                        gossip_subscribe(keychain, tokio_sender, peers).await;
                     });
                 }
-                // Send gossip Subscriptions
+                // Send Echo Subscriptions
                 7 => {
                     let tokio_sender = sender.clone();
                     let replies = self.echo_replies.lock().await.clone();
+                    let keychain = self.kc.clone();
                     tokio::spawn(async move {
-                        echo_subscribe(tokio_sender, replies).await;
+                        echo_subscribe(keychain, tokio_sender, replies).await;
                     });
                 }
-                // Send gossip Subscriptions
+                // Send Ready Subscriptions
                 8 => {
                     let tokio_sender = sender.clone();
                     let r_replies = self.ready_replies.lock().await.clone();
                     let d_replies = self.delivery_replies.lock().await.clone();
-                    let id = self.id.clone();
+                    let keychain = self.kc.clone();
                     tokio::spawn(async move {
-                        ready_subscribe(id, tokio_sender, r_replies, d_replies).await;
+                        ready_subscribe(keychain, tokio_sender, r_replies, d_replies).await;
                     });
                 }
                 // Not valid

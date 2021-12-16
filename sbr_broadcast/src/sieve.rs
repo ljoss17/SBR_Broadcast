@@ -1,11 +1,12 @@
 use crate::contagion;
-use crate::message::Message;
+use crate::message::{Message, SignedMessage};
+use crate::message_headers::{Echo, Gossip};
 use crate::utils::{check_message_occurrences, sample};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 use talk::broadcast::{BestEffort, BestEffortSettings};
-use talk::crypto::{Identity, KeyCard};
+use talk::crypto::{Identity, KeyCard, KeyChain};
 use talk::time::sleep_schedules::CappedExponential;
 use talk::unicast::{Acknowledgement, PushSettings, Sender};
 use tokio::sync::Mutex;
@@ -29,7 +30,8 @@ pub async fn init(
 }
 
 pub async fn echo_subscribe(
-    node_sender: Sender<Message>,
+    keychain: KeyChain,
+    node_sender: Sender<SignedMessage>,
     echo_replies: HashMap<Identity, Option<Message>>,
 ) {
     let push_settings = PushSettings {
@@ -43,7 +45,9 @@ pub async fn echo_subscribe(
     let settings: BestEffortSettings = BestEffortSettings { push_settings };
     let peers: Vec<Identity> = echo_replies.into_keys().collect();
     let msg = Message::new(4, String::from("EchoSubscription"));
-    let best_effort = BestEffort::new(node_sender.clone(), peers, msg.clone(), settings);
+    let signature = keychain.sign(&Echo(msg.clone())).unwrap();
+    let signed_msg = SignedMessage::new(msg, signature);
+    let best_effort = BestEffort::new(node_sender.clone(), peers, signed_msg, settings);
     best_effort.complete().await;
 }
 
@@ -58,7 +62,8 @@ pub async fn echo_subscribe(
 /// * `echo_peers` - The Atomic Reference Counter to the Echo peers to update.
 ///
 pub async fn echo_subscription(
-    node_sender: Sender<Message>,
+    keychain: KeyChain,
+    node_sender: Sender<SignedMessage>,
     from: Identity,
     delivered_echo: Option<Message>,
     echo_peers: Arc<Mutex<Vec<Identity>>>,
@@ -66,7 +71,9 @@ pub async fn echo_subscription(
     if delivered_echo.is_some() {
         let echo_content: Message = delivered_echo.unwrap();
         let msg: Message = Message::new(1, echo_content.content.clone());
-        let r = node_sender.send(from, msg).await;
+        let signature = keychain.sign(&Echo(msg.clone())).unwrap();
+        let signed_msg = SignedMessage::new(msg, signature);
+        let r = node_sender.send(from, signed_msg).await;
         match r {
             Ok(_) => {}
             Err(e) => {
@@ -90,28 +97,42 @@ pub async fn echo_subscription(
 /// * `echo_peers` - The Atomic Reference Counter to the Echo peers to update.
 ///
 pub async fn deliver(
-    content: Message,
-    node_sender: Sender<Message>,
+    keychain: KeyChain,
+    kc: KeyCard,
+    signed_msg: SignedMessage,
+    node_sender: Sender<SignedMessage>,
     delivered_echo: Arc<Mutex<Option<Message>>>,
     echo_peers: Vec<Identity>,
 ) {
-    // crypto.verify(msg)
-    let recv_msg = Some(content.clone());
-    let mut locked_echo = delivered_echo.lock().await;
-    *locked_echo = recv_msg;
-    drop(locked_echo);
-    let msg: Message = Message::new(1, content.content.clone());
-    let push_settings = PushSettings {
-        stop_condition: Acknowledgement::Strong,
-        retry_schedule: Arc::new(CappedExponential::new(
-            Duration::from_secs(1),
-            2.,
-            Duration::from_secs(180),
-        )),
-    };
-    let settings: BestEffortSettings = BestEffortSettings { push_settings };
-    let best_effort = BestEffort::new(node_sender.clone(), echo_peers, msg.clone(), settings);
-    best_effort.complete().await;
+    let correct = signed_msg
+        .clone()
+        .get_signature()
+        .verify(&kc, &Gossip(signed_msg.clone().get_message()));
+    if correct.is_ok() {
+        let recv_msg = Some(signed_msg.clone().get_message());
+        let mut locked_echo = delivered_echo.lock().await;
+        *locked_echo = recv_msg;
+        drop(locked_echo);
+        let msg: Message = Message::new(1, signed_msg.clone().get_message().content);
+        let signature = keychain.sign(&Echo(msg.clone())).unwrap();
+        let signed_echo: SignedMessage = SignedMessage::new(msg, signature);
+        let push_settings = PushSettings {
+            stop_condition: Acknowledgement::Strong,
+            retry_schedule: Arc::new(CappedExponential::new(
+                Duration::from_secs(1),
+                2.,
+                Duration::from_secs(180),
+            )),
+        };
+        let settings: BestEffortSettings = BestEffortSettings { push_settings };
+        let best_effort = BestEffort::new(
+            node_sender.clone(),
+            echo_peers,
+            signed_echo.clone(),
+            settings,
+        );
+        best_effort.complete().await;
+    }
 }
 
 /// Deliver an Echo type message. Save the Echo message in the Echo replies, used to track when a message
@@ -124,10 +145,11 @@ pub async fn deliver(
 /// * `echo_replies` - The Atomic Reference Counter to the Echo replies received.
 ///
 pub async fn deliver_echo(
+    keychain: KeyChain,
     content: Message,
     from: Identity,
     echo_replies: Arc<Mutex<HashMap<Identity, Option<Message>>>>,
-    node_sender: Sender<Message>,
+    node_sender: Sender<SignedMessage>,
     delivered_echo: Arc<Mutex<Option<Message>>>,
     e_thr: usize,
     ready_peers: Vec<Identity>,
@@ -142,6 +164,7 @@ pub async fn deliver_echo(
     }
     let echo_replies: HashMap<Identity, Option<Message>> = echo_replies.lock().await.clone();
     check_echoes(
+        keychain,
         node_sender,
         delivered_echo,
         e_thr,
@@ -163,7 +186,8 @@ pub async fn deliver_echo(
 /// * `echo_replies` - The Atomic Reference Counter to the Echo replies received.
 ///
 pub async fn check_echoes(
-    node_sender: Sender<Message>,
+    keychain: KeyChain,
+    node_sender: Sender<SignedMessage>,
     delivered_echo: Arc<Mutex<Option<Message>>>,
     e_thr: usize,
     ready_peers: Vec<Identity>,
@@ -178,7 +202,7 @@ pub async fn check_echoes(
                 let mut locked_delivered_echo = delivered_echo.lock().await;
                 *locked_delivered_echo = echo.clone();
                 drop(locked_delivered_echo);
-                contagion::deliver(msg.clone(), node_sender.clone(), ready_peers).await;
+                contagion::deliver(keychain, msg.clone(), node_sender.clone(), ready_peers).await;
                 return;
             }
         }

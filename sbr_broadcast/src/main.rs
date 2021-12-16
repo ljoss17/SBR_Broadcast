@@ -4,15 +4,18 @@
 mod my_macros;
 mod contagion;
 mod message;
+mod message_headers;
 mod murmur;
 mod node;
 mod peer;
 mod sieve;
 mod utils;
 
-use crate::message::Message;
+use crate::message::{Message, SignedMessage};
+use crate::message_headers::{Gossip, InitEcho, InitGossip, InitReady};
 use crate::node::Node;
 use rand::prelude::*;
+use std::collections::HashMap;
 use std::env;
 use std::sync::Arc;
 use std::time::Duration;
@@ -128,7 +131,7 @@ async fn run_sender(g: usize) {
         Default::default(),
     );
 
-    let sender: Sender<Message> = Sender::new(connector, Default::default());
+    let sender: Sender<SignedMessage> = Sender::new(connector, Default::default());
 
     tokio::time::sleep(std::time::Duration::from_secs(10)).await;
 
@@ -154,8 +157,10 @@ async fn run_sender(g: usize) {
     };
     let settings: BestEffortSettings = BestEffortSettings { push_settings };
     let msg = Message::new(0, String::from("Test message"));
-    println!("SENDER broadcast");
-    let best_effort = BestEffort::new(sender.clone(), peers.clone(), msg.clone(), settings);
+    let signature = sender_keychain.sign(&Gossip(msg.clone())).unwrap();
+    let signed_msg: SignedMessage = SignedMessage::new(msg, signature);
+    println!("SENDER broadcast {:?}", sender_keychain.keycard().clone());
+    let best_effort = BestEffort::new(sender.clone(), peers.clone(), signed_msg.clone(), settings);
     best_effort.complete().await;
 }
 
@@ -190,9 +195,27 @@ async fn setup_node(
     let keycards = client.get_shard(0).await.unwrap();
 
     let other_keycards = keycards
+        .clone()
         .into_iter()
         .filter(|keycard| *keycard != node_keychain.keycard())
         .collect::<Vec<_>>();
+
+    let map_keycards = keycards
+        .clone()
+        .into_iter()
+        .filter(|keycard| *keycard != node_keychain.keycard())
+        .map(|keycard| keycard.identity())
+        .zip(
+            keycards
+                .clone()
+                .into_iter()
+                .filter(|keycard| *keycard != node_keychain.keycard()),
+        )
+        .collect::<Vec<_>>();
+
+    let map_keycards: HashMap<Identity, KeyCard> = map_keycards
+        .into_iter()
+        .collect::<HashMap<Identity, KeyCard>>();
 
     let connector = Connector::new(
         ("127.0.0.1", 4446),
@@ -202,7 +225,7 @@ async fn setup_node(
 
     let sender = Sender::new(connector, Default::default());
     let mut receiver = Receiver::new(listener, Default::default());
-    let node: Node = Node::new(i, e_thr, r_thr, d_thr);
+    let node: Node = Node::new(node_keychain.clone(), map_keycards, i, e_thr, r_thr, d_thr);
     murmur::init(g, other_keycards.clone(), &node.gossip_peers).await;
     sieve::init(e, other_keycards.clone(), &node.echo_replies).await;
     contagion::init(
@@ -213,7 +236,8 @@ async fn setup_node(
         &node.delivery_replies,
     )
     .await;
-    tokio::spawn(test(node_keychain.keycard(), i));
+    let kc: KeyChain = node_keychain.clone();
+    tokio::spawn(test(kc.keycard(), i));
     node.listen(sender, &mut receiver).await;
 }
 
@@ -230,7 +254,11 @@ async fn test(kc: KeyCard, id: usize) {
     let sender = Sender::new(connector, Default::default());
     loop {
         let gossip_init: Message = Message::new(6, String::from("Init Gossip Subscription"));
-        let r = sender.send(kc.identity(), gossip_init).await;
+        let signature = init_keychain
+            .sign(&InitGossip(gossip_init.clone()))
+            .unwrap();
+        let signed_msg: SignedMessage = SignedMessage::new(gossip_init, signature);
+        let r = sender.send(kc.identity(), signed_msg).await;
         match r {
             Ok(_) => {
                 break;
@@ -243,7 +271,9 @@ async fn test(kc: KeyCard, id: usize) {
     }
     loop {
         let echo_init: Message = Message::new(7, String::from("Init Echo Subscription"));
-        let r = sender.send(kc.identity(), echo_init).await;
+        let signature = init_keychain.sign(&InitEcho(echo_init.clone())).unwrap();
+        let signed_msg: SignedMessage = SignedMessage::new(echo_init, signature);
+        let r = sender.send(kc.identity(), signed_msg).await;
         match r {
             Ok(_) => {
                 break;
@@ -256,7 +286,9 @@ async fn test(kc: KeyCard, id: usize) {
     }
     loop {
         let ready_init: Message = Message::new(8, String::from("Init Ready Subscription"));
-        let r = sender.send(kc.identity(), ready_init).await;
+        let signature = init_keychain.sign(&InitReady(ready_init.clone())).unwrap();
+        let signed_msg: SignedMessage = SignedMessage::new(ready_init, signature);
+        let r = sender.send(kc.identity(), signed_msg).await;
         match r {
             Ok(_) => {
                 break;
