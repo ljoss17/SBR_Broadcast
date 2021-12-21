@@ -1,6 +1,6 @@
 use crate::contagion;
 use crate::message::{Message, SignedMessage};
-use crate::message_headers::{Echo, Gossip};
+use crate::message_headers::Echo;
 use crate::utils::{check_message_occurrences, sample};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -101,7 +101,6 @@ pub async fn echo_subscription(
 /// # Arguments
 ///
 /// * `keychain` - KeyChain used to sign the Message.
-/// * `kc` - The KeyCard of the sender, used to verify the Message's signature.
 /// * `signed_msg` - The signed Message to deliver.
 /// * `node_sender` - The Node's Sender used to send the Gossip Subscription to the peers.
 /// * `delivered_echo` - The Atomic Reference Counter to the status of the delivered Echo Message.
@@ -109,41 +108,34 @@ pub async fn echo_subscription(
 ///
 pub async fn deliver(
     keychain: KeyChain,
-    kc: KeyCard,
     signed_msg: SignedMessage,
     node_sender: Sender<SignedMessage>,
     delivered_echo: Arc<Mutex<Option<Message>>>,
     echo_peers: Vec<Identity>,
 ) {
-    let correct = signed_msg
-        .clone()
-        .get_signature()
-        .verify(&kc, &Gossip(signed_msg.clone().get_message()));
-    if correct.is_ok() {
-        let recv_msg = Some(signed_msg.clone().get_message());
-        let mut locked_echo = delivered_echo.lock().await;
-        *locked_echo = recv_msg;
-        drop(locked_echo);
-        let msg: Message = Message::new(1, signed_msg.clone().get_message().content);
-        let signature = keychain.sign(&Echo(msg.clone())).unwrap();
-        let signed_echo: SignedMessage = SignedMessage::new(msg, signature);
-        let push_settings = PushSettings {
-            stop_condition: Acknowledgement::Strong,
-            retry_schedule: Arc::new(CappedExponential::new(
-                Duration::from_secs(1),
-                2.,
-                Duration::from_secs(180),
-            )),
-        };
-        let settings: BestEffortSettings = BestEffortSettings { push_settings };
-        let best_effort = BestEffort::new(
-            node_sender.clone(),
-            echo_peers,
-            signed_echo.clone(),
-            settings,
-        );
-        best_effort.complete().await;
-    }
+    let recv_msg = Some(signed_msg.clone().get_message());
+    let mut locked_echo = delivered_echo.lock().await;
+    *locked_echo = recv_msg;
+    drop(locked_echo);
+    let msg: Message = Message::new(1, signed_msg.clone().get_message().content);
+    let signature = keychain.sign(&Echo(msg.clone())).unwrap();
+    let signed_echo: SignedMessage = SignedMessage::new(msg, signature);
+    let push_settings = PushSettings {
+        stop_condition: Acknowledgement::Strong,
+        retry_schedule: Arc::new(CappedExponential::new(
+            Duration::from_secs(1),
+            2.,
+            Duration::from_secs(180),
+        )),
+    };
+    let settings: BestEffortSettings = BestEffortSettings { push_settings };
+    let best_effort = BestEffort::new(
+        node_sender.clone(),
+        echo_peers,
+        signed_echo.clone(),
+        settings,
+    );
+    best_effort.complete().await;
 }
 
 /// Deliver an Echo type Message. Save the Echo Message in the Echo replies, used to track when a Message

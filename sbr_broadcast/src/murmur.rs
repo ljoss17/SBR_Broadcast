@@ -72,7 +72,6 @@ pub async fn gossip_subscribe(
 /// # Arguments
 ///
 /// * `keychain` - KeyChain used to sign the Message.
-/// * `kc` - The KeyCard of the sender, used to verify the Message's signature.
 /// * `signed_msg` - The signed Message to deliver.
 /// * `node_sender` - The Node's Sender used to send Messages.
 /// * `gossip_peers` - The peers to which the Gossip will be spread.
@@ -82,7 +81,6 @@ pub async fn gossip_subscribe(
 ///
 pub async fn deliver_gossip(
     keychain: KeyChain,
-    kc: KeyCard,
     signed_msg: SignedMessage,
     node_sender: Sender<SignedMessage>,
     gossip_peers: Vec<Identity>,
@@ -90,23 +88,16 @@ pub async fn deliver_gossip(
     echo: Arc<Mutex<Option<Message>>>,
     echo_peers: Vec<Identity>,
 ) {
-    let correct = signed_msg
-        .clone()
-        .get_signature()
-        .verify(&kc, &Gossip(signed_msg.clone().get_message()));
-    if correct.is_ok() {
-        dispatch(
-            keychain,
-            kc,
-            signed_msg,
-            node_sender,
-            gossip_peers,
-            delivered_gossip,
-            echo,
-            echo_peers,
-        )
-        .await;
-    }
+    dispatch(
+        keychain,
+        signed_msg,
+        node_sender,
+        gossip_peers,
+        delivered_gossip,
+        echo,
+        echo_peers,
+    )
+    .await;
 }
 
 /// Dispatch a Message to the Gossip peers. If no Gossip Message has yet been delivered, send a Gossip
@@ -115,7 +106,6 @@ pub async fn deliver_gossip(
 /// # Arguments
 ///
 /// * `keychain` - KeyChain used to sign the Message.
-/// * `kc` - The KeyCard of the sender, used to verify the Message's signature.
 /// * `signed_msg` - The signed Message to deliver.
 /// * `node_sender` - The Node's Sender used to send Messages.
 /// * `peers` - The peers to which the Gossip will be spread.
@@ -125,7 +115,6 @@ pub async fn deliver_gossip(
 ///
 pub async fn dispatch(
     keychain: KeyChain,
-    kc: KeyCard,
     signed_msg: SignedMessage,
     node_sender: Sender<SignedMessage>,
     peers: Vec<Identity>,
@@ -161,7 +150,7 @@ pub async fn dispatch(
         );
         best_effort.complete().await;
         println!("GOT Gossip, broadcasted and will pb.Deliver");
-        sieve::deliver(keychain, kc, signed_msg, node_sender, echo, echo_peers).await;
+        sieve::deliver(keychain, signed_msg, node_sender, echo, echo_peers).await;
     }
 }
 

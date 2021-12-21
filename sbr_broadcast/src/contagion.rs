@@ -160,7 +160,6 @@ pub async fn deliver(
 ///
 pub async fn deliver_ready(
     keychain: KeyChain,
-    kc: KeyCard,
     id: usize,
     signed_msg: SignedMessage,
     from: Identity,
@@ -173,53 +172,46 @@ pub async fn deliver_ready(
     d_thr: usize,
     delivered: Arc<Mutex<Option<Message>>>,
 ) {
-    let correct = signed_msg
-        .clone()
-        .get_signature()
-        .verify(&kc, &Ready(signed_msg.clone().get_message()));
-    if correct.is_ok() {
-        let rp: Vec<Identity> = ready_replies.lock().await.clone().into_keys().collect();
-        let new_reply: Option<Message> = Some(signed_msg.clone().get_message());
-        if rp.contains(&from) {
-            let mut new_ready: bool = false;
-            if ready_replies.lock().await.clone()[&from].is_none() {
-                new_ready = true;
-            }
-            drop(rp);
-            let mut locked_ready_replies = ready_replies.lock().await;
-            locked_ready_replies.insert(from, new_reply.clone());
-            drop(locked_ready_replies);
-            let ready_replies: HashMap<Identity, Option<Message>> =
-                ready_replies.lock().await.clone();
-            if new_ready {
-                tokio::spawn(async move {
-                    check_ready(
-                        keychain,
-                        node_sender,
-                        ready_messages,
-                        r_thr,
-                        ready_peers,
-                        ready_replies,
-                    )
-                    .await;
-                });
-            }
+    let rp: Vec<Identity> = ready_replies.lock().await.clone().into_keys().collect();
+    let new_reply: Option<Message> = Some(signed_msg.clone().get_message());
+    if rp.contains(&from) {
+        let mut new_ready: bool = false;
+        if ready_replies.lock().await.clone()[&from].is_none() {
+            new_ready = true;
         }
-        let dp: Vec<Identity> = delivery_replies.lock().await.clone().into_keys().collect();
-        if dp.contains(&from) {
-            let mut new_delivery: bool = false;
-            if delivery_replies.lock().await.clone()[&from].is_none() {
-                new_delivery = true;
-            }
-            drop(dp);
-            let mut locked_delivery_replies = delivery_replies.lock().await;
-            locked_delivery_replies.insert(from, new_reply.clone());
-            drop(locked_delivery_replies);
-            let delivery_replies: HashMap<Identity, Option<Message>> =
-                delivery_replies.lock().await.clone();
-            if new_delivery {
-                check_delivery(id, d_thr, delivered, delivery_replies).await;
-            }
+        drop(rp);
+        let mut locked_ready_replies = ready_replies.lock().await;
+        locked_ready_replies.insert(from, new_reply.clone());
+        drop(locked_ready_replies);
+        let ready_replies: HashMap<Identity, Option<Message>> = ready_replies.lock().await.clone();
+        if new_ready {
+            tokio::spawn(async move {
+                check_ready(
+                    keychain,
+                    node_sender,
+                    ready_messages,
+                    r_thr,
+                    ready_peers,
+                    ready_replies,
+                )
+                .await;
+            });
+        }
+    }
+    let dp: Vec<Identity> = delivery_replies.lock().await.clone().into_keys().collect();
+    if dp.contains(&from) {
+        let mut new_delivery: bool = false;
+        if delivery_replies.lock().await.clone()[&from].is_none() {
+            new_delivery = true;
+        }
+        drop(dp);
+        let mut locked_delivery_replies = delivery_replies.lock().await;
+        locked_delivery_replies.insert(from, new_reply.clone());
+        drop(locked_delivery_replies);
+        let delivery_replies: HashMap<Identity, Option<Message>> =
+            delivery_replies.lock().await.clone();
+        if new_delivery {
+            check_delivery(id, d_thr, delivered, delivery_replies).await;
         }
     }
 }

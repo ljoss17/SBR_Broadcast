@@ -1,5 +1,8 @@
 use crate::contagion::{deliver_ready, ready_subscribe, ready_subscription};
 use crate::message::{Message, SignedMessage};
+use crate::message_headers::{
+    Echo, EchoSubscription, Gossip, GossipSubscription, Ready, ReadySubscription,
+};
 use crate::murmur::{deliver_gossip, gossip_subscribe, gossip_subscription};
 use crate::sieve::{deliver_echo, echo_subscribe, echo_subscription};
 use std::collections::HashMap;
@@ -68,88 +71,124 @@ impl Node {
             let message: SignedMessage = raw_message;
 
             let msg_type = message.clone().get_type();
+            let kc = self.keycards[&identity].clone();
             match msg_type {
                 // Gossip
                 0 => {
-                    let gp = self.gossip_peers.lock().await.clone();
-                    let dg = self.delivered_gossip.clone();
-                    let ec = self.echo.clone();
-                    let ep = self.echo_peers.lock().await.clone();
-                    let m = message.clone();
-                    let s = sender.clone();
-                    let kc = self.keycards[&identity].clone();
-                    let keychain = self.kc.clone();
-                    println!("Listen Gossip");
-                    tokio::spawn(async move {
-                        deliver_gossip(keychain, kc, m, s, gp, dg, ec, ep).await
-                    });
+                    let correct = message
+                        .clone()
+                        .get_signature()
+                        .verify(&kc, &Gossip(message.clone().get_message()));
+                    if correct.is_ok() {
+                        let gp = self.gossip_peers.lock().await.clone();
+                        let dg = self.delivered_gossip.clone();
+                        let ec = self.echo.clone();
+                        let ep = self.echo_peers.lock().await.clone();
+                        let m = message.clone();
+                        let s = sender.clone();
+                        let keychain = self.kc.clone();
+                        println!("Listen Gossip");
+                        tokio::spawn(async move {
+                            deliver_gossip(keychain, m, s, gp, dg, ec, ep).await
+                        });
+                    }
                 }
                 // Echo
                 1 => {
-                    let rp = self.ready_peers.lock().await.clone();
-                    let de = self.delivered_echo.clone();
-                    let er = self.echo_replies.clone();
-                    let ethr = self.echo_threshold.clone();
-                    let m = message.clone().get_message();
-                    let s = sender.clone();
-                    let keychain = self.kc.clone();
-                    tokio::spawn(async move {
-                        deliver_echo(keychain, m, identity, er, s, de, ethr, rp).await
-                    });
+                    let kc = self.keycards[&identity].clone();
+                    let correct = message
+                        .clone()
+                        .get_signature()
+                        .verify(&kc, &Echo(message.clone().get_message()));
+                    if correct.is_ok() {
+                        let rp = self.ready_peers.lock().await.clone();
+                        let de = self.delivered_echo.clone();
+                        let er = self.echo_replies.clone();
+                        let ethr = self.echo_threshold.clone();
+                        let m = message.clone().get_message();
+                        let s = sender.clone();
+                        let keychain = self.kc.clone();
+                        tokio::spawn(async move {
+                            deliver_echo(keychain, m, identity, er, s, de, ethr, rp).await
+                        });
+                    }
                 }
                 // Ready
                 2 => {
-                    let rp = self.ready_peers.lock().await.clone();
-                    let rr = self.ready_replies.clone();
-                    let dr = self.delivery_replies.clone();
-                    let rm = self.ready_messages.clone();
-                    let dm = self.delivered_msg.clone();
-                    let rthr = self.ready_threshold.clone();
-                    let dthr = self.delivery_threshold.clone();
-                    let m = message.clone();
-                    let s = sender.clone();
-                    let id = self.id.clone();
-                    let keychain = self.kc.clone();
-                    let kc = self.keycards[&identity].clone();
-                    tokio::spawn(async move {
-                        deliver_ready(
-                            keychain, kc, id, m, identity, rp, rr, dr, s, rm, rthr, dthr, dm,
-                        )
-                        .await
-                    });
+                    let correct = message
+                        .clone()
+                        .get_signature()
+                        .verify(&kc, &Ready(message.clone().get_message()));
+                    if correct.is_ok() {
+                        let rp = self.ready_peers.lock().await.clone();
+                        let rr = self.ready_replies.clone();
+                        let dr = self.delivery_replies.clone();
+                        let rm = self.ready_messages.clone();
+                        let dm = self.delivered_msg.clone();
+                        let rthr = self.ready_threshold.clone();
+                        let dthr = self.delivery_threshold.clone();
+                        let m = message.clone();
+                        let s = sender.clone();
+                        let id = self.id.clone();
+                        let keychain = self.kc.clone();
+                        tokio::spawn(async move {
+                            deliver_ready(
+                                keychain, id, m, identity, rp, rr, dr, s, rm, rthr, dthr, dm,
+                            )
+                            .await
+                        });
+                    }
                 }
                 // GossipSubscription
                 3 => {
-                    let gp = self.gossip_peers.clone();
-                    let dm = self.delivered_msg.lock().await.clone();
-                    let s = sender.clone();
-                    let keychain = self.kc.clone();
-                    println!("Listen GossipSubscription");
-                    tokio::spawn(async move {
-                        gossip_subscription(keychain, s, identity, gp, dm).await
-                    });
+                    let correct = message
+                        .clone()
+                        .get_signature()
+                        .verify(&kc, &GossipSubscription(message.clone().get_message()));
+                    if correct.is_ok() {
+                        let gp = self.gossip_peers.clone();
+                        let dm = self.delivered_msg.lock().await.clone();
+                        let s = sender.clone();
+                        let keychain = self.kc.clone();
+                        println!("Listen GossipSubscription");
+                        tokio::spawn(async move {
+                            gossip_subscription(keychain, s, identity, gp, dm).await
+                        });
+                    }
                 }
                 // EchoSubscription
                 4 => {
-                    let s = sender.clone();
-                    let ec = self.echo.lock().await.clone();
-                    let ep = self.echo_peers.clone();
-                    let keychain = self.kc.clone();
+                    let correct = message
+                        .clone()
+                        .get_signature()
+                        .verify(&kc, &EchoSubscription(message.clone().get_message()));
+                    if correct.is_ok() {
+                        let s = sender.clone();
+                        let ec = self.echo.lock().await.clone();
+                        let ep = self.echo_peers.clone();
+                        let keychain = self.kc.clone();
 
-                    tokio::spawn(
-                        async move { echo_subscription(keychain, s, identity, ec, ep).await },
-                    );
+                        tokio::spawn(async move {
+                            echo_subscription(keychain, s, identity, ec, ep).await
+                        });
+                    }
                 }
                 // ReadySubscription
                 5 => {
-                    let s = sender.clone();
-                    let rm = self.ready_messages.lock().await.clone();
-                    let rp = self.ready_peers.clone();
-                    let id = self.id.clone();
-                    let keychain = self.kc.clone();
-                    tokio::spawn(async move {
-                        ready_subscription(keychain, id, s, identity, rm, rp).await
-                    });
+                    let correct = message
+                        .clone()
+                        .get_signature()
+                        .verify(&kc, &ReadySubscription(message.clone().get_message()));
+                    if correct.is_ok() {
+                        let s = sender.clone();
+                        let rm = self.ready_messages.lock().await.clone();
+                        let rp = self.ready_peers.clone();
+                        let id = self.id.clone();
+                        let keychain = self.kc.clone();
+                        tokio::spawn(async move {
+                            ready_subscription(keychain, id, s, identity, rm, rp).await
+                        });
+                    }
                 }
                 // Send Gossip Subscriptions
                 6 => {
