@@ -10,12 +10,11 @@ use talk::time::sleep_schedules::CappedExponential;
 use talk::unicast::{Acknowledgement, PushSettings, Sender};
 use tokio::sync::Mutex;
 
-/// Initialises the Gossip set used in the Murmur algorithm. Chose randomly a number of peers as Gossip peers.
+/// Initialises the Gossip set used in the Murmur algorithm. Randomly chooses peers.
 ///
 /// # Arguments
 ///
 /// * `g` - The number of Gossip peers.
-/// * `node_sender` - The Node's Sender used to send messages.
 /// * `system` - The system in which the peers are randomly chosen.
 /// * `gossip_peers` - The Atomic Reference Counter to the Gossip peers to update.
 ///
@@ -33,17 +32,25 @@ pub async fn init(g: usize, system: Vec<KeyCard>, gossip_peers: &Arc<Mutex<Vec<I
     drop(locked_gossip_peers);
 }
 
+/// Send GossipSubscription to Gossip peers.
+///
+/// # Arguments
+///
+/// * `keychain` - KeyChain used to sign the Message.
+/// * `node_sender` - The Node's Sender used to send Messages.
+/// * `gossip_peers` - The Gossip peers.
+///
 pub async fn gossip_subscribe(
     keychain: KeyChain,
     node_sender: Sender<SignedMessage>,
     gossip_peers: Vec<Identity>,
 ) {
     let push_settings = PushSettings {
-        stop_condition: Acknowledgement::Strong,
+        stop_condition: Acknowledgement::Weak,
         retry_schedule: Arc::new(CappedExponential::new(
             Duration::from_secs(1),
             2.,
-            Duration::from_secs(180),
+            Duration::from_secs(10),
         )),
     };
     let settings: BestEffortSettings = BestEffortSettings { push_settings };
@@ -57,18 +64,21 @@ pub async fn gossip_subscribe(
         settings,
     );
     best_effort.complete().await;
+    println!("Finished Murmur Subscriptions");
 }
 
-/// Deliver a Gossip type message. Dispatch a verified message to its Gossip peers.
+/// Deliver a Gossip type Message. Dispatch a verified Message to its Gossip peers.
 ///
 /// # Arguments
 ///
-/// * `content` - The content of the message (Without the prepending type).
-/// * `node_sender` - The Node's Sender used to send messages.
-/// * `gossip_peers` - The Atomic Reference Counter to the peers to which the Gossip will be spread.
-/// * `delivered_gossip` - The Atomic Reference Counter to the status of the delivered Gossip message.
-/// * `echo` - The Atomic Reference Counter to the status of the Echo message (used by Sieve).
-/// * `echo_peers` - The Atomic Reference Counter to the echo peers (used by Sieve).
+/// * `keychain` - KeyChain used to sign the Message.
+/// * `kc` - The KeyCard of the sender, used to verify the Message's signature.
+/// * `signed_msg` - The signed Message to deliver.
+/// * `node_sender` - The Node's Sender used to send Messages.
+/// * `gossip_peers` - The peers to which the Gossip will be spread.
+/// * `delivered_gossip` - The Atomic Reference Counter to the status of the delivered Gossip Message.
+/// * `echo` - The Atomic Reference Counter to the status of the Echo Message (used by Sieve).
+/// * `echo_peers` - The echo peers (used by Sieve).
 ///
 pub async fn deliver_gossip(
     keychain: KeyChain,
@@ -99,17 +109,19 @@ pub async fn deliver_gossip(
     }
 }
 
-/// Dispatch a message to the Gossip peers. If no Gossip message has yet been delivered, send a Gossip
-/// message to the given peers, and then Probabilistic Broadcast deliver the message.
+/// Dispatch a Message to the Gossip peers. If no Gossip Message has yet been delivered, send a Gossip
+/// Message to the given peers, and then Probabilistic Broadcast deliver the Message.
 ///
 /// # Arguments
 ///
-/// * `content` - The content of the message (Without the prepending type).
-/// * `node_sender` - The Node's Sender used to send messages.
-/// * `peers` - The Atomic Reference Counter to the peers to which the Gossip will be spread.
-/// * `delivered_gossip` - The Atomic Reference Counter to the status of the delivered Gossip message.
-/// * `echo` - The Atomic Reference Counter to the status of the Echo message (used by Sieve).
-/// * `echo_peers` - The Atomic Reference Counter to the echo peers (used by Sieve).
+/// * `keychain` - KeyChain used to sign the Message.
+/// * `kc` - The KeyCard of the sender, used to verify the Message's signature.
+/// * `signed_msg` - The signed Message to deliver.
+/// * `node_sender` - The Node's Sender used to send Messages.
+/// * `peers` - The peers to which the Gossip will be spread.
+/// * `delivered_gossip` - The Atomic Reference Counter to the status of the delivered Gossip Message.
+/// * `echo` - The Atomic Reference Counter to the status of the Echo Message (used by Sieve).
+/// * `echo_peers` - The echo peers (used by Sieve).
 ///
 pub async fn dispatch(
     keychain: KeyChain,
@@ -122,9 +134,11 @@ pub async fn dispatch(
     echo_peers: Vec<Identity>,
 ) {
     if delivered_gossip.lock().await.is_none() {
+        println!("New Gossip");
         let mut locked_delivered = delivered_gossip.lock().await;
         *locked_delivered = Some(signed_msg.clone().get_message());
         drop(locked_delivered);
+        println!("Updated Gossip status");
         let push_settings = PushSettings {
             stop_condition: Acknowledgement::Weak,
             retry_schedule: Arc::new(CappedExponential::new(
@@ -137,6 +151,7 @@ pub async fn dispatch(
             .sign(&Gossip(signed_msg.clone().get_message()))
             .unwrap();
         let signed_broadcast = SignedMessage::new(signed_msg.clone().get_message(), signature);
+        println!("Signed new Gossip");
         let settings: BestEffortSettings = BestEffortSettings { push_settings };
         let best_effort = BestEffort::new(
             node_sender.clone(),
@@ -145,19 +160,21 @@ pub async fn dispatch(
             settings,
         );
         best_effort.complete().await;
+        println!("GOT Gossip, broadcasted and will pb.Deliver");
         sieve::deliver(keychain, kc, signed_msg, node_sender, echo, echo_peers).await;
     }
 }
 
-/// Deliver a GossipSubscription type message. If a Gossip message has already been delivered, send it to
+/// Deliver a GossipSubscription type Message. If a Gossip Message has already been delivered, send it to
 /// the subscribing peer. Add the peer to the Gossip peers.
 ///
 /// # Arguments
 ///
-/// * `node_sender` - The Node's Sender used to send messages.
+/// * `keychain` - KeyChain used to sign the Message.
+/// * `node_sender` - The Node's Sender used to send Messages.
 /// * `from` - The Identity of the Node subscribing.
 /// * `gossip_peers` - The Atomic Reference Counter to the peers to which the Gossip will be spread.
-/// * `delivered_gossip` - The Atomic Reference Counter to the status of the delivered Gossip message.
+/// * `delivered_gossip` - The status of the delivered Gossip Message.
 ///
 pub async fn gossip_subscription(
     keychain: KeyChain,

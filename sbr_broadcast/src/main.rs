@@ -7,7 +7,6 @@ mod message;
 mod message_headers;
 mod murmur;
 mod node;
-mod peer;
 mod sieve;
 mod utils;
 
@@ -30,6 +29,8 @@ extern crate rand;
 
 #[tokio::main]
 async fn main() {
+    println!("Begin Setup");
+    // Retrieve parameters from command line and parse them.
     let n_str = env::args().nth(1).expect("Size of system N.");
     let n: usize = match n_str.parse() {
         Ok(n) => n,
@@ -95,6 +96,7 @@ async fn main() {
         }
     };
 
+    // Start rendez-vous server
     let _server = Server::new(
         ("127.0.0.1", 4446),
         ServerSettings {
@@ -104,11 +106,13 @@ async fn main() {
     .await
     .unwrap();
 
+    // Setup N nodes.
     let mut nodes = vec![];
     for i in 0..n {
         nodes.push(tokio::spawn(setup_node(i, g, e, e_thr, r, r_thr, d, d_thr)));
     }
 
+    // Spawn a sender node to test the broadcasst
     tokio::spawn(run_sender(g));
 
     futures::future::join_all(nodes).await;
@@ -116,6 +120,13 @@ async fn main() {
     println!("Main ended");
 }
 
+/// Setup a sender node which will wait 5 minutes before starting to broadcast.
+/// Initialisation is due to the setup time for nodes.
+///
+/// # Arguments
+///
+/// * `g` - The Gossip set size.
+///
 async fn run_sender(g: usize) {
     let client = Client::new(("127.0.0.1", 4446), Default::default());
 
@@ -133,12 +144,15 @@ async fn run_sender(g: usize) {
 
     let sender: Sender<SignedMessage> = Sender::new(connector, Default::default());
 
+    // Delay required to retrieve the keycards of the other nodes.
     tokio::time::sleep(std::time::Duration::from_secs(10)).await;
 
     let keycards = client.get_shard(0).await.unwrap();
 
-    tokio::time::sleep(std::time::Duration::from_secs(120)).await;
+    // Delay required for the initialisation of all nodes.
+    tokio::time::sleep(std::time::Duration::from_secs(300)).await;
 
+    // Randomly choose G nodes.
     let mut peers: Vec<Identity> = vec![];
     let num_proc = keycards.clone().len();
     for _ in 1..=g {
@@ -164,6 +178,19 @@ async fn run_sender(g: usize) {
     best_effort.complete().await;
 }
 
+/// Setup and initialise a node with given parameters.
+///
+/// # Arguments
+///
+/// * `i` - The ID of the node.
+/// * `g` - The Gossip set size.
+/// * `e` - The Echo set size.
+/// * `e_thr` - The Echo threshold.
+/// * `r` - The Ready set size.
+/// * `r_thr` - The Ready threshold.
+/// * `d` - The Delivery set size.
+/// * `d_thr` - The Delivery threshold.
+///
 async fn setup_node(
     i: usize,
     g: usize,
@@ -237,11 +264,18 @@ async fn setup_node(
     )
     .await;
     let kc: KeyChain = node_keychain.clone();
-    tokio::spawn(test(kc.keycard(), i));
+    tokio::spawn(send_initialisation_signals(kc.keycard(), i));
     node.listen(sender, &mut receiver).await;
 }
 
-async fn test(kc: KeyCard, id: usize) {
+/// Send signals to initialise the sets which require subscriptions.
+///
+/// # Arguments
+///
+/// * `kc` - The KeyCard of the node to initialise.
+/// * `id` - The ID of the node.
+///
+async fn send_initialisation_signals(kc: KeyCard, id: usize) {
     tokio::time::sleep(std::time::Duration::from_secs(2)).await;
     let init_keychain = KeyChain::random();
 
@@ -252,23 +286,29 @@ async fn test(kc: KeyCard, id: usize) {
     );
 
     let sender = Sender::new(connector, Default::default());
-    loop {
-        let gossip_init: Message = Message::new(6, String::from("Init Gossip Subscription"));
-        let signature = init_keychain
-            .sign(&InitGossip(gossip_init.clone()))
-            .unwrap();
-        let signed_msg: SignedMessage = SignedMessage::new(gossip_init, signature);
-        let r = sender.send(kc.identity(), signed_msg).await;
-        match r {
-            Ok(_) => {
-                break;
-            }
-            Err(e) => {
-                println!("ERROR : <{}> init gossip send : {}", id, e);
-                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+
+    let t_sender = sender.clone();
+    let t_kc = kc.clone();
+    let t_init_keychain = init_keychain.clone();
+    tokio::spawn(async move {
+        loop {
+            let gossip_init: Message = Message::new(6, String::from("Init Gossip Subscription"));
+            let signature = t_init_keychain
+                .sign(&InitGossip(gossip_init.clone()))
+                .unwrap();
+            let signed_msg: SignedMessage = SignedMessage::new(gossip_init, signature);
+            let r = t_sender.send(t_kc.identity(), signed_msg).await;
+            match r {
+                Ok(_) => {
+                    break;
+                }
+                Err(e) => {
+                    println!("ERROR : <{}> init gossip send : {}", id, e);
+                    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                }
             }
         }
-    }
+    });
     loop {
         let echo_init: Message = Message::new(7, String::from("Init Echo Subscription"));
         let signature = init_keychain.sign(&InitEcho(echo_init.clone())).unwrap();
@@ -284,6 +324,7 @@ async fn test(kc: KeyCard, id: usize) {
             }
         }
     }
+    tokio::time::sleep(std::time::Duration::from_secs(60)).await;
     loop {
         let ready_init: Message = Message::new(8, String::from("Init Ready Subscription"));
         let signature = init_keychain.sign(&InitReady(ready_init.clone())).unwrap();

@@ -19,7 +19,6 @@ use tokio::sync::Mutex;
 ///
 /// * `r` - The number of Ready peers.
 /// * `d` - The number of Delivery peers.
-/// * `node_sender` - The Node's Sender used to send messages.
 /// * `system` - The system in which the peers are randomly chosen.
 /// * `ready_replies` - The Atomic Reference Counter to the Ready replies from the chosen peers.
 /// * `delivery_replies` - The Atomic Reference Counter to the Delivery replies from the chosen peers.
@@ -35,6 +34,15 @@ pub async fn init(
     sample(d, system.clone(), delivery_replies).await;
 }
 
+/// Send ReadySubscription to Ready and Delivery peers.
+///
+/// # Arguments
+///
+/// * `keychain` - KeyChain used to sign the Message.
+/// * `node_sender` - The Node's Sender used to send Messages.
+/// * `ready_replies` - The Ready replies used to get the Ready peers.
+/// * `delivery_replies` - The Delivery replies used to get the Delivery peers.
+///
 pub async fn ready_subscribe(
     keychain: KeyChain,
     node_sender: Sender<SignedMessage>,
@@ -42,11 +50,11 @@ pub async fn ready_subscribe(
     delivery_replies: HashMap<Identity, Option<Message>>,
 ) {
     let push_settings = PushSettings {
-        stop_condition: Acknowledgement::Weak,
+        stop_condition: Acknowledgement::Strong,
         retry_schedule: Arc::new(CappedExponential::new(
-            Duration::from_secs(1),
+            Duration::from_secs(5),
             2.,
-            Duration::from_secs(10),
+            Duration::from_secs(180),
         )),
     };
     let settings: BestEffortSettings = BestEffortSettings { push_settings };
@@ -63,15 +71,18 @@ pub async fn ready_subscribe(
         settings.clone(),
     );
     best_effort.complete().await;
+    println!("Finished Contagion Subscriptions");
 }
 
-/// Deliver a ReadySubscription type message. Send all the messages which are ready to the subscribing Node.
+/// Deliver a ReadySubscription type Message. Send all the Messages which are ready to the subscribing Node.
 ///
 /// # Arguments
 ///
-/// * `node_sender` - The Node's Sender used to send messages.
+/// * `keychain` - KeyChain used to sign the Message.
+/// * `id` - The id of the running Node, used for debug purpose.
+/// * `node_sender` - The Node's Sender used to send Messages.
 /// * `from` - The Identity of the Node subscribing.
-/// * `ready_messages` - Vector of all messages which are ready.
+/// * `ready_messages` - Vector of all Messages which are ready.
 /// * `ready_peers` - The Atomic Reference Counter the Ready peers to update.
 ///
 pub async fn ready_subscription(
@@ -98,24 +109,24 @@ pub async fn ready_subscription(
     drop(locked_ready_peers);
 }
 
-/// Probabilistic Consistent Broadcast Deliver. If the message is verified, send a Ready of the message to the
+/// Probabilistic Consistent Broadcast Deliver. If the Message is verified, send a Ready of the Message to the
 /// Ready peers.
 ///
 /// # Arguments
 ///
-/// * `content` - The content of the message (Without the prepending type).
+/// * `keychain` - KeyChain used to sign the Message.
+/// * `message` - The received Message.
 /// * `node_sender` - The Node's Sender used to send the Gossip Subscription to the peers.
 /// * `ready_peers` - The Atomic Reference Counter the Ready peers.
 ///
 pub async fn deliver(
     keychain: KeyChain,
-    content: Message,
+    message: Message,
     node_sender: Sender<SignedMessage>,
     ready_peers: Vec<Identity>,
 ) {
-    // crypto.verify(msg)
     for r in ready_peers.into_iter() {
-        let msg: Message = Message::new(2, content.content.clone());
+        let msg: Message = Message::new(2, message.content.clone());
         let signature = keychain.sign(&Ready(msg.clone())).unwrap();
         let signed_msg = SignedMessage::new(msg, signature);
         let r = node_sender.send(r.clone(), signed_msg).await;
@@ -128,17 +139,24 @@ pub async fn deliver(
     }
 }
 
-/// Deliver a Ready type message. Check if the sending Node is in the Ready peers and/or Delivery peers,
+/// Deliver a Ready type Message. Check if the sending Node is in the Ready peers and/or Delivery peers,
 /// and update the corresponding replies if it is.
 ///
 /// # Arguments
 ///
-/// * `content` - The content of the message (Without the prepending type).
+/// * `keychain` - KeyChain used to sign the Message.
+/// * `kc` - The KeyCard of the sender, used to verify the Message signature.
+/// * `id` - The id of the running Node, used for debug purpose.
+/// * `signed_msg` - The signed Message to deliver.
 /// * `from` - The Identity of the Node sending the Ready.
-/// * `ready_peers` - The Atomic Reference Counter the Ready peers.
-/// * `delivery_peers` - The Atomic Reference Counter the Delivery peers.
-/// * `ready_replies` - The Atomic Reference Counter to the Ready replies from the chosen peers.
-/// * `delivery_replies` - The Atomic Reference Counter to the Delivery replies from the chosen peers.
+/// * `ready_peers` - The Ready peers.
+/// * `ready_replies` - The Atomic Reference Counter the Ready replies to update.
+/// * `delivery_replies` - The Atomic Reference Counter the Delivery replies to update.
+/// * `node_sender` - The Node's Sender used to send the Gossip Subscription to the peers.
+/// * `ready_messages` - The Atomic Reference Counter to the Messages which are Ready.
+/// * `r_thr` - The threshold defining if enough Ready replies have been received.
+/// * `d_thr` - The threshold defining if enough Delivery replies have been received.
+/// * `delivered` - The Atomic Reference Counter to the delivered Message.
 ///
 pub async fn deliver_ready(
     keychain: KeyChain,
@@ -163,47 +181,60 @@ pub async fn deliver_ready(
         let rp: Vec<Identity> = ready_replies.lock().await.clone().into_keys().collect();
         let new_reply: Option<Message> = Some(signed_msg.clone().get_message());
         if rp.contains(&from) {
+            let mut new_ready: bool = false;
+            if ready_replies.lock().await.clone()[&from].is_none() {
+                new_ready = true;
+            }
             drop(rp);
             let mut locked_ready_replies = ready_replies.lock().await;
             locked_ready_replies.insert(from, new_reply.clone());
             drop(locked_ready_replies);
             let ready_replies: HashMap<Identity, Option<Message>> =
                 ready_replies.lock().await.clone();
-            tokio::spawn(async move {
-                check_ready(
-                    keychain,
-                    node_sender,
-                    ready_messages,
-                    r_thr,
-                    ready_peers,
-                    ready_replies,
-                )
-                .await;
-            });
+            if new_ready {
+                tokio::spawn(async move {
+                    check_ready(
+                        keychain,
+                        node_sender,
+                        ready_messages,
+                        r_thr,
+                        ready_peers,
+                        ready_replies,
+                    )
+                    .await;
+                });
+            }
         }
         let dp: Vec<Identity> = delivery_replies.lock().await.clone().into_keys().collect();
         if dp.contains(&from) {
+            let mut new_delivery: bool = false;
+            if delivery_replies.lock().await.clone()[&from].is_none() {
+                new_delivery = true;
+            }
             drop(dp);
             let mut locked_delivery_replies = delivery_replies.lock().await;
             locked_delivery_replies.insert(from, new_reply.clone());
             drop(locked_delivery_replies);
             let delivery_replies: HashMap<Identity, Option<Message>> =
                 delivery_replies.lock().await.clone();
-            check_delivery(id, d_thr, delivered, delivery_replies).await;
+            if new_delivery {
+                check_delivery(id, d_thr, delivered, delivery_replies).await;
+            }
         }
     }
 }
 
 /// Check the status of the Ready replies received. If more than the threshold have been
-/// received, add the message to the messages which are Ready. And send it as a Ready message to the Ready peers.
+/// received, add the Message to the Messages which are Ready. And send it as a Ready Message to the Ready peers.
 ///
 /// # Arguments
 ///
+/// * `keychain` - KeyChain used to sign the Message.
 /// * `node_sender` - The Node's Sender used to send the Gossip Subscription to the peers.
-/// * `ready_messages` - The Atomic Reference Counter to vector of all messages which are ready.
-/// * `e_thr` - The threshold defining if enough Echo replies have been received.
-/// * `ready_peers` - The Atomic Reference Counter the Ready peers.
-/// * `ready_replies` - The Atomic Reference Counter to the Ready replies from the chosen peers.
+/// * `ready_messages` - The Atomic Reference Counter to vector of all Messages which are ready.
+/// * `r_thr` - The threshold defining if enough Ready replies have been received.
+/// * `ready_peers` - The Ready peers.
+/// * `ready_replies` - The Ready replies from the chosen peers.
 ///
 async fn check_ready(
     keychain: KeyChain,
@@ -244,13 +275,14 @@ async fn check_ready(
 }
 
 /// Check the status of the Delivery replies received. If more than the threshold have been
-/// received Probabilistic Reliable Broadcast Deliver the message.
+/// received Probabilistic Reliable Broadcast Deliver the Message.
 ///
 /// # Arguments
 ///
+/// * `id` - The id of the running Node, used for debug purpose.
 /// * `d_thr` - The threshold defining if enough Delivery replies have been received.
-/// * `delivered` - The Atomic Reference Counter the delivered message.
-/// * `delivery_replies` - The Atomic Reference Counter to the Delivery replies from the chosen peers.
+/// * `delivered` - The Atomic Reference Counter the delivered Message.
+/// * `delivery_replies` - The Delivery replies from the chosen peers.
 ///
 async fn check_delivery(
     id: usize,
@@ -261,7 +293,7 @@ async fn check_delivery(
     let mut locked_delivered = delivered.lock().await;
     if locked_delivered.is_none() {
         let occ = check_message_occurrences(delivery_replies);
-
+        println!("<{}> CONTAGION :\n{:?}", id, occ);
         for m in occ {
             if m.1 >= d_thr {
                 my_print!(format!("{} delivered : {}", id, m.0.clone()));
@@ -276,22 +308,22 @@ async fn check_delivery(
     }
 }
 
-/// Probabilistic Reliable Broadcast Deliver. Save the delivered message in a file with a unique name.
-/// This is used to see which Nodes have delivered which message.
+/// Probabilistic Reliable Broadcast Deliver. Save the delivered Message in a file with a unique name.
+/// This is used to see which Nodes have delivered which Message.
 ///
 /// # Arguments
 ///
-/// * `content` - The content of the message (Without the prepending type).
-/// * `uid` - Unique ID used to name the file and identify which Node has delivered which message.
+/// * `message` - The Message to deliver.
+/// * `uid` - Unique ID used to name the file and identify which Node has delivered which Message.
 ///
-pub async fn prb_deliver(content: String, uid: String) {
+pub async fn prb_deliver(message: String, uid: String) {
     // *** Optional lines used to verify delivery of messages. ***
     loop {
         let file = File::create(format!("check/tmp_{}.txt", uid));
         match file {
             Ok(mut f) => {
                 loop {
-                    let r = write!(f, "DELIVERED : {}", content);
+                    let r = write!(f, "DELIVERED : {}", message);
                     match r {
                         Ok(_) => {
                             break;

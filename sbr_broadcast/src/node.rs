@@ -79,6 +79,7 @@ impl Node {
                     let s = sender.clone();
                     let kc = self.keycards[&identity].clone();
                     let keychain = self.kc.clone();
+                    println!("Listen Gossip");
                     tokio::spawn(async move {
                         deliver_gossip(keychain, kc, m, s, gp, dg, ec, ep).await
                     });
@@ -123,6 +124,7 @@ impl Node {
                     let dm = self.delivered_msg.lock().await.clone();
                     let s = sender.clone();
                     let keychain = self.kc.clone();
+                    println!("Listen GossipSubscription");
                     tokio::spawn(async move {
                         gossip_subscription(keychain, s, identity, gp, dm).await
                     });
