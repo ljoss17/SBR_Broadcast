@@ -45,6 +45,7 @@ pub async fn gossip_subscribe(
     node_sender: Sender<SignedMessage>,
     gossip_peers: Vec<Identity>,
 ) {
+    println!("Begin Murmur subscribing");
     let push_settings = PushSettings {
         stop_condition: Acknowledgement::Weak,
         retry_schedule: Arc::new(CappedExponential::new(
@@ -123,11 +124,9 @@ pub async fn dispatch(
     echo_peers: Vec<Identity>,
 ) {
     if delivered_gossip.lock().await.is_none() {
-        println!("New Gossip");
         let mut locked_delivered = delivered_gossip.lock().await;
         *locked_delivered = Some(signed_msg.clone().get_message());
         drop(locked_delivered);
-        println!("Updated Gossip status");
         let push_settings = PushSettings {
             stop_condition: Acknowledgement::Weak,
             retry_schedule: Arc::new(CappedExponential::new(
@@ -140,7 +139,6 @@ pub async fn dispatch(
             .sign(&Gossip(signed_msg.clone().get_message()))
             .unwrap();
         let signed_broadcast = SignedMessage::new(signed_msg.clone().get_message(), signature);
-        println!("Signed new Gossip");
         let settings: BestEffortSettings = BestEffortSettings { push_settings };
         let best_effort = BestEffort::new(
             node_sender.clone(),

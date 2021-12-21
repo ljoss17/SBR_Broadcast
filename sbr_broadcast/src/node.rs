@@ -65,13 +65,17 @@ impl Node {
         self,
         sender: Sender<SignedMessage>,
         receiver: &mut Receiver<SignedMessage>,
+        dummy_kc: KeyCard,
     ) {
         loop {
             let (identity, raw_message, _) = receiver.receive().await;
             let message: SignedMessage = raw_message;
 
             let msg_type = message.clone().get_type();
-            let kc = self.keycards[&identity].clone();
+            let mut kc = dummy_kc.clone();
+            if msg_type < 6 {
+                kc = self.keycards[&identity].clone();
+            }
             match msg_type {
                 // Gossip
                 0 => {
@@ -87,7 +91,6 @@ impl Node {
                         let m = message.clone();
                         let s = sender.clone();
                         let keychain = self.kc.clone();
-                        println!("Listen Gossip");
                         tokio::spawn(async move {
                             deliver_gossip(keychain, m, s, gp, dg, ec, ep).await
                         });
@@ -95,6 +98,7 @@ impl Node {
                 }
                 // Echo
                 1 => {
+                    println!("Got echo");
                     let kc = self.keycards[&identity].clone();
                     let correct = message
                         .clone()
@@ -150,7 +154,6 @@ impl Node {
                         let dm = self.delivered_msg.lock().await.clone();
                         let s = sender.clone();
                         let keychain = self.kc.clone();
-                        println!("Listen GossipSubscription");
                         tokio::spawn(async move {
                             gossip_subscription(keychain, s, identity, gp, dm).await
                         });

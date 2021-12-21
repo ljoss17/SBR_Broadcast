@@ -41,12 +41,13 @@ pub async fn echo_subscribe(
     node_sender: Sender<SignedMessage>,
     echo_replies: HashMap<Identity, Option<Message>>,
 ) {
+    println!("Begin Sieve subscribing");
     let push_settings = PushSettings {
-        stop_condition: Acknowledgement::Strong,
+        stop_condition: Acknowledgement::Weak,
         retry_schedule: Arc::new(CappedExponential::new(
-            Duration::from_secs(5),
+            Duration::from_secs(1),
             2.,
-            Duration::from_secs(180),
+            Duration::from_secs(10),
         )),
     };
     let settings: BestEffortSettings = BestEffortSettings { push_settings };
@@ -121,7 +122,7 @@ pub async fn deliver(
     let signature = keychain.sign(&Echo(msg.clone())).unwrap();
     let signed_echo: SignedMessage = SignedMessage::new(msg, signature);
     let push_settings = PushSettings {
-        stop_condition: Acknowledgement::Strong,
+        stop_condition: Acknowledgement::Weak,
         retry_schedule: Arc::new(CappedExponential::new(
             Duration::from_secs(1),
             2.,
@@ -135,6 +136,7 @@ pub async fn deliver(
         signed_echo.clone(),
         settings,
     );
+    println!("Will broadcast Echoes");
     best_effort.complete().await;
 }
 

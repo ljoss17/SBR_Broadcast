@@ -29,7 +29,7 @@ extern crate rand;
 
 #[tokio::main]
 async fn main() {
-    println!("Begin Setup");
+    //println!("Begin Setup");
     // Retrieve parameters from command line and parse them.
     let n_str = env::args().nth(1).expect("Size of system N.");
     let n: usize = match n_str.parse() {
@@ -265,7 +265,8 @@ async fn setup_node(
     .await;
     let kc: KeyChain = node_keychain.clone();
     tokio::spawn(send_initialisation_signals(kc.keycard(), i));
-    node.listen(sender, &mut receiver).await;
+    node.listen(sender, &mut receiver, kc.keycard().clone())
+        .await;
 }
 
 /// Send signals to initialise the sets which require subscriptions.
@@ -309,6 +310,7 @@ async fn send_initialisation_signals(kc: KeyCard, id: usize) {
             }
         }
     });
+    tokio::time::sleep(std::time::Duration::from_secs(30)).await;
     loop {
         let echo_init: Message = Message::new(7, String::from("Init Echo Subscription"));
         let signature = init_keychain.sign(&InitEcho(echo_init.clone())).unwrap();
@@ -324,7 +326,7 @@ async fn send_initialisation_signals(kc: KeyCard, id: usize) {
             }
         }
     }
-    tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+    tokio::time::sleep(std::time::Duration::from_secs(30)).await;
     loop {
         let ready_init: Message = Message::new(8, String::from("Init Ready Subscription"));
         let signature = init_keychain.sign(&InitReady(ready_init.clone())).unwrap();

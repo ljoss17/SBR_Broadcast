@@ -49,12 +49,13 @@ pub async fn ready_subscribe(
     ready_replies: HashMap<Identity, Option<Message>>,
     delivery_replies: HashMap<Identity, Option<Message>>,
 ) {
+    println!("Begin Contagion subscribing");
     let push_settings = PushSettings {
-        stop_condition: Acknowledgement::Strong,
+        stop_condition: Acknowledgement::Weak,
         retry_schedule: Arc::new(CappedExponential::new(
-            Duration::from_secs(5),
+            Duration::from_secs(1),
             2.,
-            Duration::from_secs(180),
+            Duration::from_secs(10),
         )),
     };
     let settings: BestEffortSettings = BestEffortSettings { push_settings };
@@ -285,7 +286,6 @@ async fn check_delivery(
     let mut locked_delivered = delivered.lock().await;
     if locked_delivered.is_none() {
         let occ = check_message_occurrences(delivery_replies);
-        println!("<{}> CONTAGION :\n{:?}", id, occ);
         for m in occ {
             if m.1 >= d_thr {
                 my_print!(format!("{} delivered : {}", id, m.0.clone()));
