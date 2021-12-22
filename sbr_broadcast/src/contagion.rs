@@ -50,7 +50,7 @@ pub async fn ready_subscribe(
     delivery_replies: HashMap<Identity, Option<Message>>,
 ) {
     let push_settings = PushSettings {
-        stop_condition: Acknowledgement::Strong,
+        stop_condition: Acknowledgement::Weak,
         retry_schedule: Arc::new(CappedExponential::new(
             Duration::from_secs(5),
             2.,
@@ -129,11 +129,16 @@ pub async fn deliver(
         let msg: Message = Message::new(2, message.content.clone());
         let signature = keychain.sign(&Ready(msg.clone())).unwrap();
         let signed_msg = SignedMessage::new(msg, signature);
-        let r = node_sender.send(r.clone(), signed_msg).await;
-        match r {
-            Ok(_) => {}
-            Err(e) => {
-                println!("ERROR : deliver send : {}", e);
+        loop {
+            let r = node_sender.send(r.clone(), signed_msg.clone()).await;
+            match r {
+                Ok(_) => {
+                    break;
+                }
+                Err(e) => {
+                    println!("ERROR : deliver send : {}", e);
+                    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                }
             }
         }
     }

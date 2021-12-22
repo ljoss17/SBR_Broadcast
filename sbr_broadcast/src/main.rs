@@ -150,7 +150,7 @@ async fn run_sender(g: usize) {
     let keycards = client.get_shard(0).await.unwrap();
 
     // Delay required for the initialisation of all nodes.
-    tokio::time::sleep(std::time::Duration::from_secs(300)).await;
+    tokio::time::sleep(std::time::Duration::from_secs(120)).await;
 
     // Randomly choose G nodes.
     let mut peers: Vec<Identity> = vec![];
@@ -324,7 +324,6 @@ async fn send_initialisation_signals(kc: KeyCard, id: usize) {
             }
         }
     }
-    tokio::time::sleep(std::time::Duration::from_secs(60)).await;
     loop {
         let ready_init: Message = Message::new(8, String::from("Init Ready Subscription"));
         let signature = init_keychain.sign(&InitReady(ready_init.clone())).unwrap();

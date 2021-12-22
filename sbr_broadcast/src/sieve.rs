@@ -42,7 +42,7 @@ pub async fn echo_subscribe(
     echo_replies: HashMap<Identity, Option<Message>>,
 ) {
     let push_settings = PushSettings {
-        stop_condition: Acknowledgement::Strong,
+        stop_condition: Acknowledgement::Weak,
         retry_schedule: Arc::new(CappedExponential::new(
             Duration::from_secs(5),
             2.,
@@ -82,11 +82,16 @@ pub async fn echo_subscription(
         let msg: Message = Message::new(1, echo_message.content.clone());
         let signature = keychain.sign(&Echo(msg.clone())).unwrap();
         let signed_msg = SignedMessage::new(msg, signature);
-        let r = node_sender.send(from, signed_msg).await;
-        match r {
-            Ok(_) => {}
-            Err(e) => {
-                println!("ERROR : echo_subscription send : {}", e);
+        loop {
+            let r = node_sender.send(from, signed_msg.clone()).await;
+            match r {
+                Ok(_) => {
+                    break;
+                }
+                Err(e) => {
+                    println!("ERROR : echo_subscription send : {}", e);
+                    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                }
             }
         }
     }
@@ -128,7 +133,7 @@ pub async fn deliver(
         let signature = keychain.sign(&Echo(msg.clone())).unwrap();
         let signed_echo: SignedMessage = SignedMessage::new(msg, signature);
         let push_settings = PushSettings {
-            stop_condition: Acknowledgement::Strong,
+            stop_condition: Acknowledgement::Weak,
             retry_schedule: Arc::new(CappedExponential::new(
                 Duration::from_secs(1),
                 2.,
@@ -212,7 +217,6 @@ pub async fn check_echoes(
 ) {
     if delivered_echo.lock().await.is_none() {
         let occ = check_message_occurrences(echo_replies);
-        println!("SIEVE :\n{:?}", occ);
         for m in occ {
             if m.1 >= e_thr {
                 let msg = Message::new(1, m.0.clone());

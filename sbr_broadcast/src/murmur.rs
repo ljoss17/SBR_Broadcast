@@ -134,11 +134,9 @@ pub async fn dispatch(
     echo_peers: Vec<Identity>,
 ) {
     if delivered_gossip.lock().await.is_none() {
-        println!("New Gossip");
         let mut locked_delivered = delivered_gossip.lock().await;
         *locked_delivered = Some(signed_msg.clone().get_message());
         drop(locked_delivered);
-        println!("Updated Gossip status");
         let push_settings = PushSettings {
             stop_condition: Acknowledgement::Weak,
             retry_schedule: Arc::new(CappedExponential::new(
@@ -151,7 +149,6 @@ pub async fn dispatch(
             .sign(&Gossip(signed_msg.clone().get_message()))
             .unwrap();
         let signed_broadcast = SignedMessage::new(signed_msg.clone().get_message(), signature);
-        println!("Signed new Gossip");
         let settings: BestEffortSettings = BestEffortSettings { push_settings };
         let best_effort = BestEffort::new(
             node_sender.clone(),
@@ -186,11 +183,16 @@ pub async fn gossip_subscription(
     if let Some(delivered_msg) = delivered_gossip {
         let signature = keychain.sign(&Gossip(delivered_msg.clone())).unwrap();
         let signed_msg = SignedMessage::new(delivered_msg, signature);
-        let r = node_sender.send(from, signed_msg.clone()).await;
-        match r {
-            Ok(_) => {}
-            Err(e) => {
-                println!("ERROR : gossip_subscription send : {}", e);
+        loop {
+            let r = node_sender.send(from, signed_msg.clone()).await;
+            match r {
+                Ok(_) => {
+                    break;
+                }
+                Err(e) => {
+                    println!("ERROR : gossip_subscription send : {}", e);
+                    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                }
             }
         }
     }
