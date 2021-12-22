@@ -49,7 +49,6 @@ pub async fn ready_subscribe(
     ready_replies: HashMap<Identity, Option<Message>>,
     delivery_replies: HashMap<Identity, Option<Message>>,
 ) {
-    println!("Begin Contagion subscribing");
     let push_settings = PushSettings {
         stop_condition: Acknowledgement::Weak,
         retry_schedule: Arc::new(CappedExponential::new(
@@ -72,7 +71,7 @@ pub async fn ready_subscribe(
         settings.clone(),
     );
     best_effort.complete().await;
-    println!("Finished Contagion Subscriptions");
+    my_print!("Finished Contagion Subscriptions");
 }
 
 /// Deliver a ReadySubscription type Message. Send all the Messages which are ready to the subscribing Node.
@@ -84,7 +83,7 @@ pub async fn ready_subscribe(
 /// * `node_sender` - The Node's Sender used to send Messages.
 /// * `from` - The Identity of the Node subscribing.
 /// * `ready_messages` - Vector of all Messages which are ready.
-/// * `ready_peers` - The Atomic Reference Counter the Ready peers to update.
+/// * `ready_subscribers` - The Atomic Reference Counter the Ready peers subscribed to this Node.
 ///
 pub async fn ready_subscription(
     keychain: KeyChain,
@@ -92,7 +91,7 @@ pub async fn ready_subscription(
     node_sender: Sender<SignedMessage>,
     from: Identity,
     ready_messages: Vec<Message>,
-    ready_peers: Arc<Mutex<Vec<Identity>>>,
+    ready_subscribers: Arc<Mutex<Vec<Identity>>>,
 ) {
     for msg in ready_messages.into_iter() {
         let signature = keychain.sign(&Ready(msg.clone())).unwrap();
@@ -105,9 +104,9 @@ pub async fn ready_subscription(
             }
         }
     }
-    let mut locked_ready_peers = ready_peers.lock().await;
-    locked_ready_peers.push(from);
-    drop(locked_ready_peers);
+    let mut locked_ready_subscribers = ready_subscribers.lock().await;
+    locked_ready_subscribers.push(from);
+    drop(locked_ready_subscribers);
 }
 
 /// Probabilistic Consistent Broadcast Deliver. If the Message is verified, send a Ready of the Message to the
@@ -118,26 +117,37 @@ pub async fn ready_subscription(
 /// * `keychain` - KeyChain used to sign the Message.
 /// * `message` - The received Message.
 /// * `node_sender` - The Node's Sender used to send the Gossip Subscription to the peers.
-/// * `ready_peers` - The Atomic Reference Counter the Ready peers.
+/// * `ready_subscribers` - The Atomic Reference Counter the Ready peers subscribed to this Node.
 ///
 pub async fn deliver(
     keychain: KeyChain,
     message: Message,
     node_sender: Sender<SignedMessage>,
-    ready_peers: Vec<Identity>,
+    ready_subscribers: Vec<Identity>,
+    ready_messages: Arc<Mutex<Vec<Message>>>,
 ) {
-    for r in ready_peers.into_iter() {
-        let msg: Message = Message::new(2, message.content.clone());
-        let signature = keychain.sign(&Ready(msg.clone())).unwrap();
-        let signed_msg = SignedMessage::new(msg, signature);
-        let r = node_sender.send(r.clone(), signed_msg).await;
-        match r {
-            Ok(_) => {}
-            Err(e) => {
-                println!("ERROR : deliver send : {}", e);
-            }
-        }
-    }
+    let mut locked_ready_replies = ready_messages.lock().await;
+    locked_ready_replies.push(message.clone());
+    drop(locked_ready_replies);
+    let msg: Message = Message::new(2, message.content.clone());
+    let signature = keychain.sign(&Ready(msg.clone())).unwrap();
+    let signed_msg = SignedMessage::new(msg, signature);
+    let push_settings = PushSettings {
+        stop_condition: Acknowledgement::Weak,
+        retry_schedule: Arc::new(CappedExponential::new(
+            Duration::from_secs(1),
+            2.,
+            Duration::from_secs(10),
+        )),
+    };
+    let settings: BestEffortSettings = BestEffortSettings { push_settings };
+    let best_effort = BestEffort::new(
+        node_sender.clone(),
+        ready_subscribers.clone(),
+        signed_msg.clone(),
+        settings.clone(),
+    );
+    best_effort.complete().await;
 }
 
 /// Deliver a Ready type Message. Check if the sending Node is in the Ready peers and/or Delivery peers,
@@ -150,7 +160,7 @@ pub async fn deliver(
 /// * `id` - The id of the running Node, used for debug purpose.
 /// * `signed_msg` - The signed Message to deliver.
 /// * `from` - The Identity of the Node sending the Ready.
-/// * `ready_peers` - The Ready peers.
+/// * `ready_subscribers` - The Ready peers subscribed to this Node.
 /// * `ready_replies` - The Atomic Reference Counter the Ready replies to update.
 /// * `delivery_replies` - The Atomic Reference Counter the Delivery replies to update.
 /// * `node_sender` - The Node's Sender used to send the Gossip Subscription to the peers.
@@ -164,7 +174,7 @@ pub async fn deliver_ready(
     id: usize,
     signed_msg: SignedMessage,
     from: Identity,
-    ready_peers: Vec<Identity>,
+    ready_subscribers: Vec<Identity>,
     ready_replies: Arc<Mutex<HashMap<Identity, Option<Message>>>>,
     delivery_replies: Arc<Mutex<HashMap<Identity, Option<Message>>>>,
     node_sender: Sender<SignedMessage>,
@@ -189,10 +199,11 @@ pub async fn deliver_ready(
             tokio::spawn(async move {
                 check_ready(
                     keychain,
+                    from.clone(),
                     node_sender,
                     ready_messages,
                     r_thr,
-                    ready_peers,
+                    ready_subscribers,
                     ready_replies,
                 )
                 .await;
@@ -212,7 +223,7 @@ pub async fn deliver_ready(
         let delivery_replies: HashMap<Identity, Option<Message>> =
             delivery_replies.lock().await.clone();
         if new_delivery {
-            check_delivery(id, d_thr, delivered, delivery_replies).await;
+            check_delivery(id, from, d_thr, delivered, delivery_replies).await;
         }
     }
 }
@@ -226,43 +237,51 @@ pub async fn deliver_ready(
 /// * `node_sender` - The Node's Sender used to send the Gossip Subscription to the peers.
 /// * `ready_messages` - The Atomic Reference Counter to vector of all Messages which are ready.
 /// * `r_thr` - The threshold defining if enough Ready replies have been received.
-/// * `ready_peers` - The Ready peers.
+/// * `ready_subscribers` - The Ready peers subscribed to this Node.
 /// * `ready_replies` - The Ready replies from the chosen peers.
 ///
 async fn check_ready(
     keychain: KeyChain,
+    from: Identity,
     node_sender: Sender<SignedMessage>,
     ready_messages: Arc<Mutex<Vec<Message>>>,
     r_thr: usize,
-    ready_peers: Vec<Identity>,
+    ready_subscribers: Vec<Identity>,
     ready_replies: HashMap<Identity, Option<Message>>,
 ) {
-    let occ = check_message_occurrences(ready_replies);
-    for m in occ {
-        if m.1 >= r_thr {
-            let msg = Message::new(2, m.0.clone());
-            let signature = keychain.sign(&Ready(msg.clone())).unwrap();
-            let mut locked_ready_replies = ready_messages.lock().await;
-            locked_ready_replies.push(msg.clone());
-            drop(locked_ready_replies);
+    if ready_replies
+        .clone()
+        .into_keys()
+        .collect::<Vec<Identity>>()
+        .contains(&from)
+    {
+        let occ = check_message_occurrences(ready_replies);
+        for m in occ {
+            if m.1 >= r_thr {
+                let msg = Message::new(2, m.0.clone());
+                let signature = keychain.sign(&Ready(msg.clone())).unwrap();
+                let mut locked_ready_replies = ready_messages.lock().await;
+                locked_ready_replies.push(msg.clone());
+                drop(locked_ready_replies);
 
-            let push_settings = PushSettings {
-                stop_condition: Acknowledgement::Weak,
-                retry_schedule: Arc::new(CappedExponential::new(
-                    Duration::from_secs(1),
-                    2.,
-                    Duration::from_secs(10),
-                )),
-            };
-            let signed_msg = SignedMessage::new(msg, signature);
-            let settings: BestEffortSettings = BestEffortSettings { push_settings };
-            let best_effort = BestEffort::new(
-                node_sender.clone(),
-                ready_peers.clone(),
-                signed_msg.clone(),
-                settings.clone(),
-            );
-            best_effort.complete().await;
+                let push_settings = PushSettings {
+                    stop_condition: Acknowledgement::Weak,
+                    retry_schedule: Arc::new(CappedExponential::new(
+                        Duration::from_secs(1),
+                        2.,
+                        Duration::from_secs(10),
+                    )),
+                };
+                let signed_msg = SignedMessage::new(msg, signature);
+                let settings: BestEffortSettings = BestEffortSettings { push_settings };
+                let best_effort = BestEffort::new(
+                    node_sender.clone(),
+                    ready_subscribers.clone(),
+                    signed_msg.clone(),
+                    settings.clone(),
+                );
+                best_effort.complete().await;
+            }
         }
     }
 }
@@ -279,22 +298,30 @@ async fn check_ready(
 ///
 async fn check_delivery(
     id: usize,
+    from: Identity,
     d_thr: usize,
     delivered: Arc<Mutex<Option<Message>>>,
     delivery_replies: HashMap<Identity, Option<Message>>,
 ) {
-    let mut locked_delivered = delivered.lock().await;
-    if locked_delivered.is_none() {
-        let occ = check_message_occurrences(delivery_replies);
-        for m in occ {
-            if m.1 >= d_thr {
-                my_print!(format!("{} delivered : {}", id, m.0.clone()));
-                let msg = Message::new(2, m.0.clone());
-                let msg: Option<Message> = Some(msg);
-                *locked_delivered = msg.clone();
-                drop(locked_delivered);
-                prb_deliver(m.0.clone(), id.to_string()).await;
-                break;
+    if delivery_replies
+        .clone()
+        .into_keys()
+        .collect::<Vec<Identity>>()
+        .contains(&from)
+    {
+        let mut locked_delivered = delivered.lock().await;
+        if locked_delivered.is_none() {
+            let occ = check_message_occurrences(delivery_replies);
+            for m in occ {
+                if m.1 >= d_thr {
+                    my_print!(format!("{} delivered : {}", id, m.0.clone()));
+                    let msg = Message::new(2, m.0.clone());
+                    let msg: Option<Message> = Some(msg);
+                    *locked_delivered = msg.clone();
+                    drop(locked_delivered);
+                    prb_deliver(m.0.clone(), id.to_string()).await;
+                    break;
+                }
             }
         }
     }

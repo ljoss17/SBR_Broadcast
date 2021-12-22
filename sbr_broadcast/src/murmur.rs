@@ -45,7 +45,6 @@ pub async fn gossip_subscribe(
     node_sender: Sender<SignedMessage>,
     gossip_peers: Vec<Identity>,
 ) {
-    println!("Begin Murmur subscribing");
     let push_settings = PushSettings {
         stop_condition: Acknowledgement::Weak,
         retry_schedule: Arc::new(CappedExponential::new(
@@ -65,7 +64,7 @@ pub async fn gossip_subscribe(
         settings,
     );
     best_effort.complete().await;
-    println!("Finished Murmur Subscriptions");
+    my_print!("Finished Murmur Subscriptions");
 }
 
 /// Deliver a Gossip type Message. Dispatch a verified Message to its Gossip peers.
@@ -147,7 +146,6 @@ pub async fn dispatch(
             settings,
         );
         best_effort.complete().await;
-        println!("GOT Gossip, broadcasted and will pb.Deliver");
         sieve::deliver(keychain, signed_msg, node_sender, echo, echo_peers).await;
     }
 }

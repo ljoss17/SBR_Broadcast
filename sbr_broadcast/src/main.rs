@@ -13,16 +13,11 @@ mod utils;
 use crate::message::{Message, SignedMessage};
 use crate::message_headers::{Gossip, InitEcho, InitGossip, InitReady};
 use crate::node::Node;
-use rand::prelude::*;
 use std::collections::HashMap;
 use std::env;
-use std::sync::Arc;
-use std::time::Duration;
-use talk::broadcast::{BestEffort, BestEffortSettings};
 use talk::crypto::{Identity, KeyCard, KeyChain};
 use talk::link::rendezvous::{Client, Connector, Listener, Server, ServerSettings};
-use talk::time::sleep_schedules::CappedExponential;
-use talk::unicast::{Acknowledgement, PushSettings, Receiver, Sender};
+use talk::unicast::{Receiver, Sender};
 
 extern crate chrono;
 extern crate rand;
@@ -100,7 +95,7 @@ async fn main() {
     let _server = Server::new(
         ("127.0.0.1", 4446),
         ServerSettings {
-            shard_sizes: vec![n + 1],
+            shard_sizes: vec![n],
         },
     )
     .await
@@ -113,28 +108,24 @@ async fn main() {
     }
 
     // Spawn a sender node to test the broadcasst
-    tokio::spawn(run_sender(g));
+    //tokio::spawn(run_sender(g));
 
     futures::future::join_all(nodes).await;
 
     println!("Main ended");
 }
 
-/// Setup a sender node which will wait 5 minutes before starting to broadcast.
-/// Initialisation is due to the setup time for nodes.
+/// Wait for system to finish setup and then send the signal to trigger the Broadcast.
 ///
 /// # Arguments
 ///
-/// * `g` - The Gossip set size.
+/// * `id` - The Identity of the Node which will receive the signal.
 ///
-async fn run_sender(g: usize) {
-    let client = Client::new(("127.0.0.1", 4446), Default::default());
-
+async fn trigger_send(id: Identity) {
+    my_print!("Waiting for setup");
+    tokio::time::sleep(std::time::Duration::from_secs(120)).await;
+    my_print!("Wait over");
     let sender_keychain = KeyChain::random();
-    client
-        .publish_card(sender_keychain.keycard(), Some(0))
-        .await
-        .unwrap();
 
     let connector = Connector::new(
         ("127.0.0.1", 4446),
@@ -142,40 +133,23 @@ async fn run_sender(g: usize) {
         Default::default(),
     );
 
-    let sender: Sender<SignedMessage> = Sender::new(connector, Default::default());
-
-    // Delay required to retrieve the keycards of the other nodes.
-    tokio::time::sleep(std::time::Duration::from_secs(10)).await;
-
-    let keycards = client.get_shard(0).await.unwrap();
-
-    // Delay required for the initialisation of all nodes.
-    tokio::time::sleep(std::time::Duration::from_secs(300)).await;
-
-    // Randomly choose G nodes.
-    let mut peers: Vec<Identity> = vec![];
-    let num_proc = keycards.clone().len();
-    for _ in 1..=g {
-        let mut rng = rand::thread_rng();
-        let i = rng.gen_range(0..num_proc);
-        drop(rng);
-        peers.push(keycards[i].identity().clone());
-    }
-    let push_settings = PushSettings {
-        stop_condition: Acknowledgement::Weak,
-        retry_schedule: Arc::new(CappedExponential::new(
-            Duration::from_secs(1),
-            2.,
-            Duration::from_secs(180),
-        )),
-    };
-    let settings: BestEffortSettings = BestEffortSettings { push_settings };
-    let msg = Message::new(0, String::from("Test message"));
+    let tmp_sender: Sender<SignedMessage> = Sender::new(connector, Default::default());
+    let msg = Message::new(9, String::from("Trigger send"));
     let signature = sender_keychain.sign(&Gossip(msg.clone())).unwrap();
     let signed_msg: SignedMessage = SignedMessage::new(msg, signature);
-    println!("SENDER broadcast {:?}", sender_keychain.keycard().clone());
-    let best_effort = BestEffort::new(sender.clone(), peers.clone(), signed_msg.clone(), settings);
-    best_effort.complete().await;
+    loop {
+        let r = tmp_sender.send(id, signed_msg.clone()).await;
+        match r {
+            Ok(_) => {
+                println!("Sent trigger");
+                break;
+            }
+            Err(e) => {
+                println!("ERROR : echo_subscription send : {}", e);
+                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+            }
+        }
+    }
 }
 
 /// Setup and initialise a node with given parameters.
@@ -217,7 +191,7 @@ async fn setup_node(
         .await
         .unwrap();
 
-    tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+    tokio::time::sleep(std::time::Duration::from_secs(20)).await;
 
     let keycards = client.get_shard(0).await.unwrap();
 
@@ -265,6 +239,10 @@ async fn setup_node(
     .await;
     let kc: KeyChain = node_keychain.clone();
     tokio::spawn(send_initialisation_signals(kc.keycard(), i));
+    if i == 0 {
+        let tmp_id = kc.keycard().identity().clone();
+        tokio::spawn(async move { trigger_send(tmp_id).await });
+    }
     node.listen(sender, &mut receiver, kc.keycard().clone())
         .await;
 }
@@ -310,36 +288,48 @@ async fn send_initialisation_signals(kc: KeyCard, id: usize) {
             }
         }
     });
-    tokio::time::sleep(std::time::Duration::from_secs(30)).await;
-    loop {
-        let echo_init: Message = Message::new(7, String::from("Init Echo Subscription"));
-        let signature = init_keychain.sign(&InitEcho(echo_init.clone())).unwrap();
-        let signed_msg: SignedMessage = SignedMessage::new(echo_init, signature);
-        let r = sender.send(kc.identity(), signed_msg).await;
-        match r {
-            Ok(_) => {
-                break;
-            }
-            Err(e) => {
-                println!("ERROR : <{}> init sieve send : {}", id, e);
-                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-            }
-        }
-    }
-    tokio::time::sleep(std::time::Duration::from_secs(30)).await;
-    loop {
-        let ready_init: Message = Message::new(8, String::from("Init Ready Subscription"));
-        let signature = init_keychain.sign(&InitReady(ready_init.clone())).unwrap();
-        let signed_msg: SignedMessage = SignedMessage::new(ready_init, signature);
-        let r = sender.send(kc.identity(), signed_msg).await;
-        match r {
-            Ok(_) => {
-                break;
-            }
-            Err(e) => {
-                println!("ERROR : <{}> init contagion send : {}", id, e);
-                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+    tokio::time::sleep(std::time::Duration::from_secs(20)).await;
+    let t_sender = sender.clone();
+    let t_kc = kc.clone();
+    let t_init_keychain = init_keychain.clone();
+    tokio::spawn(async move {
+        loop {
+            let echo_init: Message = Message::new(7, String::from("Init Echo Subscription"));
+            let signature = t_init_keychain.sign(&InitEcho(echo_init.clone())).unwrap();
+            let signed_msg: SignedMessage = SignedMessage::new(echo_init, signature);
+            let r = t_sender.send(t_kc.identity(), signed_msg).await;
+            match r {
+                Ok(_) => {
+                    break;
+                }
+                Err(e) => {
+                    println!("ERROR : <{}> init sieve send : {}", id, e);
+                    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                }
             }
         }
-    }
+    });
+    tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+    let t_sender = sender.clone();
+    let t_kc = kc.clone();
+    let t_init_keychain = init_keychain.clone();
+    tokio::spawn(async move {
+        loop {
+            let ready_init: Message = Message::new(8, String::from("Init Ready Subscription"));
+            let signature = t_init_keychain
+                .sign(&InitReady(ready_init.clone()))
+                .unwrap();
+            let signed_msg: SignedMessage = SignedMessage::new(ready_init, signature);
+            let r = t_sender.send(t_kc.identity(), signed_msg).await;
+            match r {
+                Ok(_) => {
+                    break;
+                }
+                Err(e) => {
+                    println!("ERROR : <{}> init contagion send : {}", id, e);
+                    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                }
+            }
+        }
+    });
 }

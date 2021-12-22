@@ -3,7 +3,7 @@ use crate::message::{Message, SignedMessage};
 use crate::message_headers::{
     Echo, EchoSubscription, Gossip, GossipSubscription, Ready, ReadySubscription,
 };
-use crate::murmur::{deliver_gossip, gossip_subscribe, gossip_subscription};
+use crate::murmur::{deliver_gossip, dispatch, gossip_subscribe, gossip_subscription};
 use crate::sieve::{deliver_echo, echo_subscribe, echo_subscription};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -16,8 +16,8 @@ pub struct Node {
     keycards: HashMap<Identity, KeyCard>,
     pub id: usize,
     pub gossip_peers: Arc<Mutex<Vec<Identity>>>,
-    pub echo_peers: Arc<Mutex<Vec<Identity>>>,
-    ready_peers: Arc<Mutex<Vec<Identity>>>,
+    pub echo_subscribers: Arc<Mutex<Vec<Identity>>>,
+    ready_subscribers: Arc<Mutex<Vec<Identity>>>,
     echo_threshold: usize,
     ready_threshold: usize,
     delivery_threshold: usize,
@@ -45,8 +45,8 @@ impl Node {
             keycards,
             id,
             gossip_peers: Arc::new(Mutex::new(Vec::new())),
-            echo_peers: Arc::new(Mutex::new(Vec::new())),
-            ready_peers: Arc::new(Mutex::new(Vec::new())),
+            echo_subscribers: Arc::new(Mutex::new(Vec::new())),
+            ready_subscribers: Arc::new(Mutex::new(Vec::new())),
             echo_threshold,
             ready_threshold,
             delivery_threshold,
@@ -87,7 +87,8 @@ impl Node {
                         let gp = self.gossip_peers.lock().await.clone();
                         let dg = self.delivered_gossip.clone();
                         let ec = self.echo.clone();
-                        let ep = self.echo_peers.lock().await.clone();
+                        let ep: Vec<Identity> =
+                            self.echo_replies.lock().await.clone().into_keys().collect();
                         let m = message.clone();
                         let s = sender.clone();
                         let keychain = self.kc.clone();
@@ -98,22 +99,22 @@ impl Node {
                 }
                 // Echo
                 1 => {
-                    println!("Got echo");
                     let kc = self.keycards[&identity].clone();
                     let correct = message
                         .clone()
                         .get_signature()
                         .verify(&kc, &Echo(message.clone().get_message()));
                     if correct.is_ok() {
-                        let rp = self.ready_peers.lock().await.clone();
+                        let rp = self.ready_subscribers.lock().await.clone();
                         let de = self.delivered_echo.clone();
                         let er = self.echo_replies.clone();
                         let ethr = self.echo_threshold.clone();
                         let m = message.clone().get_message();
                         let s = sender.clone();
                         let keychain = self.kc.clone();
+                        let rm = self.ready_messages.clone();
                         tokio::spawn(async move {
-                            deliver_echo(keychain, m, identity, er, s, de, ethr, rp).await
+                            deliver_echo(keychain, m, identity, er, s, de, ethr, rp, rm).await
                         });
                     }
                 }
@@ -124,7 +125,7 @@ impl Node {
                         .get_signature()
                         .verify(&kc, &Ready(message.clone().get_message()));
                     if correct.is_ok() {
-                        let rp = self.ready_peers.lock().await.clone();
+                        let rp = self.ready_subscribers.lock().await.clone();
                         let rr = self.ready_replies.clone();
                         let dr = self.delivery_replies.clone();
                         let rm = self.ready_messages.clone();
@@ -168,7 +169,7 @@ impl Node {
                     if correct.is_ok() {
                         let s = sender.clone();
                         let ec = self.echo.lock().await.clone();
-                        let ep = self.echo_peers.clone();
+                        let ep = self.echo_subscribers.clone();
                         let keychain = self.kc.clone();
 
                         tokio::spawn(async move {
@@ -185,7 +186,7 @@ impl Node {
                     if correct.is_ok() {
                         let s = sender.clone();
                         let rm = self.ready_messages.lock().await.clone();
-                        let rp = self.ready_peers.clone();
+                        let rp = self.ready_subscribers.clone();
                         let id = self.id.clone();
                         let keychain = self.kc.clone();
                         tokio::spawn(async move {
@@ -219,6 +220,22 @@ impl Node {
                     let keychain = self.kc.clone();
                     tokio::spawn(async move {
                         ready_subscribe(keychain, tokio_sender, r_replies, d_replies).await;
+                    });
+                }
+                // Trigger sender
+                9 => {
+                    println!("Trigger sender");
+                    let tokio_sender = sender.clone();
+                    let keychain = self.kc.clone();
+                    let msg = Message::new(0, String::from("Test message"));
+                    let signature = keychain.sign(&Gossip(msg.clone())).unwrap();
+                    let signed_msg: SignedMessage = SignedMessage::new(msg, signature);
+                    let peers = self.gossip_peers.lock().await.clone();
+                    let dg = self.delivered_gossip.clone();
+                    let ec = self.echo.clone();
+                    let ep = self.echo_subscribers.lock().await.clone();
+                    tokio::spawn(async move {
+                        dispatch(keychain, signed_msg, tokio_sender, peers, dg, ec, ep).await
                     });
                 }
                 // Not valid

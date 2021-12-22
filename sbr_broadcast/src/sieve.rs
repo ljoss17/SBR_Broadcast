@@ -41,7 +41,6 @@ pub async fn echo_subscribe(
     node_sender: Sender<SignedMessage>,
     echo_replies: HashMap<Identity, Option<Message>>,
 ) {
-    println!("Begin Sieve subscribing");
     let push_settings = PushSettings {
         stop_condition: Acknowledgement::Weak,
         retry_schedule: Arc::new(CappedExponential::new(
@@ -51,13 +50,14 @@ pub async fn echo_subscribe(
         )),
     };
     let settings: BestEffortSettings = BestEffortSettings { push_settings };
+    // Collect Identities to which a Subscription is sent.
     let peers: Vec<Identity> = echo_replies.into_keys().collect();
     let msg = Message::new(4, String::from("EchoSubscription"));
     let signature = keychain.sign(&Echo(msg.clone())).unwrap();
     let signed_msg = SignedMessage::new(msg, signature);
     let best_effort = BestEffort::new(node_sender.clone(), peers, signed_msg, settings);
     best_effort.complete().await;
-    println!("Finished Sieve Subscriptions");
+    my_print!("Finished Sieve Subscriptions");
 }
 
 /// Deliver an EchoSubscription type Message. If an Echo Message has already been delivered, send
@@ -76,24 +76,29 @@ pub async fn echo_subscription(
     node_sender: Sender<SignedMessage>,
     from: Identity,
     delivered_echo: Option<Message>,
-    echo_peers: Arc<Mutex<Vec<Identity>>>,
+    echo_subscribers: Arc<Mutex<Vec<Identity>>>,
 ) {
     if delivered_echo.is_some() {
         let echo_message: Message = delivered_echo.unwrap();
         let msg: Message = Message::new(1, echo_message.content.clone());
         let signature = keychain.sign(&Echo(msg.clone())).unwrap();
         let signed_msg = SignedMessage::new(msg, signature);
-        let r = node_sender.send(from, signed_msg).await;
-        match r {
-            Ok(_) => {}
-            Err(e) => {
-                println!("ERROR : echo_subscription send : {}", e);
+        loop {
+            let r = node_sender.send(from, signed_msg.clone()).await;
+            match r {
+                Ok(_) => {
+                    break;
+                }
+                Err(e) => {
+                    println!("ERROR : echo_subscription send : {}", e);
+                    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                }
             }
         }
     }
-    let mut locked_echo_peers = echo_peers.lock().await;
-    locked_echo_peers.push(from);
-    drop(locked_echo_peers);
+    let mut locked_echo_subscribers = echo_subscribers.lock().await;
+    locked_echo_subscribers.push(from);
+    drop(locked_echo_subscribers);
 }
 
 /// Probabilistic Broadcast Deliver. If the Message is verified, send an Echo of the Message to the
@@ -112,7 +117,7 @@ pub async fn deliver(
     signed_msg: SignedMessage,
     node_sender: Sender<SignedMessage>,
     delivered_echo: Arc<Mutex<Option<Message>>>,
-    echo_peers: Vec<Identity>,
+    echo_subscribers: Vec<Identity>,
 ) {
     let recv_msg = Some(signed_msg.clone().get_message());
     let mut locked_echo = delivered_echo.lock().await;
@@ -132,11 +137,10 @@ pub async fn deliver(
     let settings: BestEffortSettings = BestEffortSettings { push_settings };
     let best_effort = BestEffort::new(
         node_sender.clone(),
-        echo_peers,
+        echo_subscribers,
         signed_echo.clone(),
         settings,
     );
-    println!("Will broadcast Echoes");
     best_effort.complete().await;
 }
 
@@ -163,6 +167,7 @@ pub async fn deliver_echo(
     delivered_echo: Arc<Mutex<Option<Message>>>,
     e_thr: usize,
     ready_peers: Vec<Identity>,
+    ready_messages: Arc<Mutex<Vec<Message>>>,
 ) {
     if echo_replies.lock().await.contains_key(&from) {
         if echo_replies.lock().await.get(&from).unwrap().is_none() {
@@ -171,17 +176,19 @@ pub async fn deliver_echo(
             locked_replies.insert(from, new_reply);
             drop(locked_replies);
         }
+
+        let echo_replies: HashMap<Identity, Option<Message>> = echo_replies.lock().await.clone();
+        check_echoes(
+            keychain,
+            node_sender,
+            delivered_echo,
+            e_thr,
+            ready_peers,
+            echo_replies,
+            ready_messages,
+        )
+        .await;
     }
-    let echo_replies: HashMap<Identity, Option<Message>> = echo_replies.lock().await.clone();
-    check_echoes(
-        keychain,
-        node_sender,
-        delivered_echo,
-        e_thr,
-        ready_peers,
-        echo_replies,
-    )
-    .await;
 }
 
 /// Check the status of the Echo replies received. If more than the threshold have been
@@ -203,10 +210,10 @@ pub async fn check_echoes(
     e_thr: usize,
     ready_peers: Vec<Identity>,
     echo_replies: HashMap<Identity, Option<Message>>,
+    ready_messages: Arc<Mutex<Vec<Message>>>,
 ) {
     if delivered_echo.lock().await.is_none() {
         let occ = check_message_occurrences(echo_replies);
-        println!("SIEVE :\n{:?}", occ);
         for m in occ {
             if m.1 >= e_thr {
                 let msg = Message::new(1, m.0.clone());
@@ -214,7 +221,14 @@ pub async fn check_echoes(
                 let mut locked_delivered_echo = delivered_echo.lock().await;
                 *locked_delivered_echo = echo.clone();
                 drop(locked_delivered_echo);
-                contagion::deliver(keychain, msg.clone(), node_sender.clone(), ready_peers).await;
+                contagion::deliver(
+                    keychain,
+                    msg.clone(),
+                    node_sender.clone(),
+                    ready_peers,
+                    ready_messages,
+                )
+                .await;
                 return;
             }
         }
