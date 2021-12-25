@@ -123,7 +123,7 @@ async fn main() {
 ///
 async fn trigger_send(id: Identity) {
     my_print!("Waiting for setup");
-    tokio::time::sleep(std::time::Duration::from_secs(120)).await;
+    tokio::time::sleep(std::time::Duration::from_secs(60)).await;
     my_print!("Wait over");
     let sender_keychain = KeyChain::random();
 
@@ -288,7 +288,6 @@ async fn send_initialisation_signals(kc: KeyCard, id: usize) {
             }
         }
     });
-    tokio::time::sleep(std::time::Duration::from_secs(20)).await;
     let t_sender = sender.clone();
     let t_kc = kc.clone();
     let t_init_keychain = init_keychain.clone();

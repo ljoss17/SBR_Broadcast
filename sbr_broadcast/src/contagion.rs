@@ -8,7 +8,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use talk::broadcast::{BestEffort, BestEffortSettings};
 use talk::crypto::{Identity, KeyCard, KeyChain};
-use talk::time::sleep_schedules::CappedExponential;
+use talk::time::sleep_schedules::{CappedExponential, Constant};
 use talk::unicast::{Acknowledgement, PushSettings, Sender};
 use tokio::sync::Mutex;
 
@@ -44,18 +44,15 @@ pub async fn init(
 /// * `delivery_replies` - The Delivery replies used to get the Delivery peers.
 ///
 pub async fn ready_subscribe(
+    r_w: u64,
     keychain: KeyChain,
     node_sender: Sender<SignedMessage>,
     ready_replies: HashMap<Identity, Option<Message>>,
     delivery_replies: HashMap<Identity, Option<Message>>,
 ) {
     let push_settings = PushSettings {
-        stop_condition: Acknowledgement::Weak,
-        retry_schedule: Arc::new(CappedExponential::new(
-            Duration::from_secs(1),
-            2.,
-            Duration::from_secs(10),
-        )),
+        stop_condition: Acknowledgement::Strong,
+        retry_schedule: Arc::new(Constant::new(Duration::from_millis(100))),
     };
     let settings: BestEffortSettings = BestEffortSettings { push_settings };
     let mut peers_ready: Vec<Identity> = ready_replies.into_keys().collect();
@@ -71,6 +68,31 @@ pub async fn ready_subscribe(
         settings.clone(),
     );
     best_effort.complete().await;
+
+    /*
+    let peers_ready: Vec<Identity> = ready_replies.into_keys().collect();
+    let peers_delivery: Vec<Identity> = delivery_replies.into_keys().collect();
+    let msg = Message::new(5, String::from("ReadySubscription"));
+    let signature = keychain.sign(&ReadySubscription(msg.clone())).unwrap();
+    let signed_msg = SignedMessage::new(msg, signature);
+    let best_effort_r = BestEffort::new(
+        node_sender.clone(),
+        peers_ready,
+        signed_msg.clone(),
+        settings_r,
+    );
+    best_effort_r.complete().await;
+    tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+    let msg = Message::new(5, String::from("ReadySubscription"));
+    let signature = keychain.sign(&ReadySubscription(msg.clone())).unwrap();
+    let signed_msg = SignedMessage::new(msg, signature);
+    let best_effort_d = BestEffort::new(
+        node_sender.clone(),
+        peers_delivery,
+        signed_msg.clone(),
+        settings_d,
+    );
+    best_effort_d.complete().await;*/
     my_print!("Finished Contagion Subscriptions");
 }
 
@@ -133,7 +155,7 @@ pub async fn deliver(
     let signature = keychain.sign(&Ready(msg.clone())).unwrap();
     let signed_msg = SignedMessage::new(msg, signature);
     let push_settings = PushSettings {
-        stop_condition: Acknowledgement::Weak,
+        stop_condition: Acknowledgement::Strong,
         retry_schedule: Arc::new(CappedExponential::new(
             Duration::from_secs(1),
             2.,
@@ -265,7 +287,7 @@ async fn check_ready(
                 drop(locked_ready_replies);
 
                 let push_settings = PushSettings {
-                    stop_condition: Acknowledgement::Weak,
+                    stop_condition: Acknowledgement::Strong,
                     retry_schedule: Arc::new(CappedExponential::new(
                         Duration::from_secs(1),
                         2.,

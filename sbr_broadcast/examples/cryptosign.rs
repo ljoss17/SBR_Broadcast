@@ -29,8 +29,8 @@ async fn main() {
     let alice_keychain = KeyChain::random();
     let alice_keycard = alice_keychain.keycard();
 
-    let age2: u32 = 30;
     let age = Age(30);
+    let age2: u32 = 30;
     let signature = alice_keychain.sign(&age).unwrap();
     let signature2 = alice_keychain.sign(&Age(age2)).unwrap();
 

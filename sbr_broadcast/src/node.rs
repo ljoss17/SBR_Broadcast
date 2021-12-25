@@ -5,6 +5,7 @@ use crate::message_headers::{
 };
 use crate::murmur::{deliver_gossip, dispatch, gossip_subscribe, gossip_subscription};
 use crate::sieve::{deliver_echo, echo_subscribe, echo_subscription};
+use rand::prelude::*;
 use std::collections::HashMap;
 use std::sync::Arc;
 use talk::crypto::{Identity, KeyCard, KeyChain};
@@ -68,7 +69,7 @@ impl Node {
         dummy_kc: KeyCard,
     ) {
         loop {
-            let (identity, raw_message, _) = receiver.receive().await;
+            let (identity, raw_message, acknowledger) = receiver.receive().await;
             let message: SignedMessage = raw_message;
 
             let msg_type = message.clone().get_type();
@@ -84,6 +85,7 @@ impl Node {
                         .get_signature()
                         .verify(&kc, &Gossip(message.clone().get_message()));
                     if correct.is_ok() {
+                        acknowledger.strong();
                         let gp = self.gossip_peers.lock().await.clone();
                         let dg = self.delivered_gossip.clone();
                         let ec = self.echo.clone();
@@ -105,6 +107,7 @@ impl Node {
                         .get_signature()
                         .verify(&kc, &Echo(message.clone().get_message()));
                     if correct.is_ok() {
+                        acknowledger.strong();
                         let rp = self.ready_subscribers.lock().await.clone();
                         let de = self.delivered_echo.clone();
                         let er = self.echo_replies.clone();
@@ -125,6 +128,7 @@ impl Node {
                         .get_signature()
                         .verify(&kc, &Ready(message.clone().get_message()));
                     if correct.is_ok() {
+                        acknowledger.strong();
                         let rp = self.ready_subscribers.lock().await.clone();
                         let rr = self.ready_replies.clone();
                         let dr = self.delivery_replies.clone();
@@ -151,6 +155,7 @@ impl Node {
                         .get_signature()
                         .verify(&kc, &GossipSubscription(message.clone().get_message()));
                     if correct.is_ok() {
+                        acknowledger.strong();
                         let gp = self.gossip_peers.clone();
                         let dm = self.delivered_msg.lock().await.clone();
                         let s = sender.clone();
@@ -167,6 +172,7 @@ impl Node {
                         .get_signature()
                         .verify(&kc, &EchoSubscription(message.clone().get_message()));
                     if correct.is_ok() {
+                        acknowledger.strong();
                         let s = sender.clone();
                         let ec = self.echo.lock().await.clone();
                         let ep = self.echo_subscribers.clone();
@@ -179,11 +185,17 @@ impl Node {
                 }
                 // ReadySubscription
                 5 => {
+                    /*my_print!(format!(
+                        "<{}> : Got Ready Subscription from : {:?}",
+                        self.id,
+                        identity.clone()
+                    ));*/
                     let correct = message
                         .clone()
                         .get_signature()
                         .verify(&kc, &ReadySubscription(message.clone().get_message()));
                     if correct.is_ok() {
+                        acknowledger.strong();
                         let s = sender.clone();
                         let rm = self.ready_messages.lock().await.clone();
                         let rp = self.ready_subscribers.clone();
@@ -192,6 +204,8 @@ impl Node {
                         tokio::spawn(async move {
                             ready_subscription(keychain, id, s, identity, rm, rp).await
                         });
+                    } else {
+                        my_print!(format!("Problem with Ready Subscription : {:?}", correct));
                     }
                 }
                 // Send Gossip Subscriptions
@@ -199,8 +213,11 @@ impl Node {
                     let tokio_sender = sender.clone();
                     let peers = self.gossip_peers.lock().await.clone();
                     let keychain = self.kc.clone();
+                    let mut rng = rand::thread_rng();
+                    let r_w = rng.gen_range(0..50) + 1;
+                    drop(rng);
                     tokio::spawn(async move {
-                        gossip_subscribe(keychain, tokio_sender, peers).await;
+                        gossip_subscribe(r_w, keychain, tokio_sender, peers).await;
                     });
                 }
                 // Send Echo Subscriptions
@@ -208,8 +225,11 @@ impl Node {
                     let tokio_sender = sender.clone();
                     let replies = self.echo_replies.lock().await.clone();
                     let keychain = self.kc.clone();
+                    let mut rng = rand::thread_rng();
+                    let r_w = rng.gen_range(0..50) + 1;
+                    drop(rng);
                     tokio::spawn(async move {
-                        echo_subscribe(keychain, tokio_sender, replies).await;
+                        echo_subscribe(r_w, keychain, tokio_sender, replies).await;
                     });
                 }
                 // Send Ready Subscriptions
@@ -218,8 +238,11 @@ impl Node {
                     let r_replies = self.ready_replies.lock().await.clone();
                     let d_replies = self.delivery_replies.lock().await.clone();
                     let keychain = self.kc.clone();
+                    let mut rng = rand::thread_rng();
+                    let r_w = rng.gen_range(0..50) + 1;
+                    drop(rng);
                     tokio::spawn(async move {
-                        ready_subscribe(keychain, tokio_sender, r_replies, d_replies).await;
+                        ready_subscribe(r_w, keychain, tokio_sender, r_replies, d_replies).await;
                     });
                 }
                 // Trigger sender

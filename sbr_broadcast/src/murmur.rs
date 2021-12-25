@@ -41,16 +41,17 @@ pub async fn init(g: usize, system: Vec<KeyCard>, gossip_peers: &Arc<Mutex<Vec<I
 /// * `gossip_peers` - The Gossip peers.
 ///
 pub async fn gossip_subscribe(
+    r_w: u64,
     keychain: KeyChain,
     node_sender: Sender<SignedMessage>,
     gossip_peers: Vec<Identity>,
 ) {
     let push_settings = PushSettings {
-        stop_condition: Acknowledgement::Weak,
+        stop_condition: Acknowledgement::Strong,
         retry_schedule: Arc::new(CappedExponential::new(
-            Duration::from_secs(1),
+            Duration::from_secs(r_w),
             2.,
-            Duration::from_secs(10),
+            Duration::from_secs(100),
         )),
     };
     let settings: BestEffortSettings = BestEffortSettings { push_settings };
@@ -127,7 +128,7 @@ pub async fn dispatch(
         *locked_delivered = Some(signed_msg.clone().get_message());
         drop(locked_delivered);
         let push_settings = PushSettings {
-            stop_condition: Acknowledgement::Weak,
+            stop_condition: Acknowledgement::Strong,
             retry_schedule: Arc::new(CappedExponential::new(
                 Duration::from_secs(1),
                 2.,

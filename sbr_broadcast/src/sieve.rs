@@ -1,6 +1,6 @@
 use crate::contagion;
 use crate::message::{Message, SignedMessage};
-use crate::message_headers::Echo;
+use crate::message_headers::{Echo, EchoSubscription};
 use crate::utils::{check_message_occurrences, sample};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -37,23 +37,24 @@ pub async fn init(
 /// * `echo_replies` - The Echo replies used to get the Echo peers.
 ///
 pub async fn echo_subscribe(
+    r_w: u64,
     keychain: KeyChain,
     node_sender: Sender<SignedMessage>,
     echo_replies: HashMap<Identity, Option<Message>>,
 ) {
     let push_settings = PushSettings {
-        stop_condition: Acknowledgement::Weak,
+        stop_condition: Acknowledgement::Strong,
         retry_schedule: Arc::new(CappedExponential::new(
-            Duration::from_secs(1),
+            Duration::from_secs(r_w),
             2.,
-            Duration::from_secs(10),
+            Duration::from_secs(r_w * 10),
         )),
     };
     let settings: BestEffortSettings = BestEffortSettings { push_settings };
     // Collect Identities to which a Subscription is sent.
     let peers: Vec<Identity> = echo_replies.into_keys().collect();
     let msg = Message::new(4, String::from("EchoSubscription"));
-    let signature = keychain.sign(&Echo(msg.clone())).unwrap();
+    let signature = keychain.sign(&EchoSubscription(msg.clone())).unwrap();
     let signed_msg = SignedMessage::new(msg, signature);
     let best_effort = BestEffort::new(node_sender.clone(), peers, signed_msg, settings);
     best_effort.complete().await;
@@ -127,11 +128,11 @@ pub async fn deliver(
     let signature = keychain.sign(&Echo(msg.clone())).unwrap();
     let signed_echo: SignedMessage = SignedMessage::new(msg, signature);
     let push_settings = PushSettings {
-        stop_condition: Acknowledgement::Weak,
+        stop_condition: Acknowledgement::Strong,
         retry_schedule: Arc::new(CappedExponential::new(
             Duration::from_secs(1),
             2.,
-            Duration::from_secs(180),
+            Duration::from_secs(10),
         )),
     };
     let settings: BestEffortSettings = BestEffortSettings { push_settings };
