@@ -107,9 +107,6 @@ async fn main() {
         nodes.push(tokio::spawn(setup_node(i, g, e, e_thr, r, r_thr, d, d_thr)));
     }
 
-    // Spawn a sender node to test the broadcasst
-    //tokio::spawn(run_sender(g));
-
     futures::future::join_all(nodes).await;
 
     println!("Main ended");
@@ -122,8 +119,7 @@ async fn main() {
 /// * `id` - The Identity of the Node which will receive the signal.
 ///
 async fn trigger_send(id: Identity) {
-    my_print!("Waiting for setup");
-    tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+    tokio::time::sleep(std::time::Duration::from_secs(600)).await;
     my_print!("Wait over");
     let sender_keychain = KeyChain::random();
 
@@ -176,6 +172,11 @@ async fn setup_node(
     d_thr: usize,
 ) {
     let node_keychain = KeyChain::random();
+    println!(
+        "<{}> : KC : {:?}",
+        i,
+        node_keychain.keycard().identity().clone()
+    );
 
     let listener = Listener::new(
         ("127.0.0.1", 4446),
@@ -255,7 +256,7 @@ async fn setup_node(
 /// * `id` - The ID of the node.
 ///
 async fn send_initialisation_signals(kc: KeyCard, id: usize) {
-    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
     let init_keychain = KeyChain::random();
 
     let connector = Connector::new(
@@ -288,6 +289,7 @@ async fn send_initialisation_signals(kc: KeyCard, id: usize) {
             }
         }
     });
+    tokio::time::sleep(std::time::Duration::from_secs(60)).await;
     let t_sender = sender.clone();
     let t_kc = kc.clone();
     let t_init_keychain = init_keychain.clone();
@@ -308,7 +310,7 @@ async fn send_initialisation_signals(kc: KeyCard, id: usize) {
             }
         }
     });
-    tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+    tokio::time::sleep(std::time::Duration::from_secs(120)).await;
     let t_sender = sender.clone();
     let t_kc = kc.clone();
     let t_init_keychain = init_keychain.clone();

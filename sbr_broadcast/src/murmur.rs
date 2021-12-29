@@ -6,7 +6,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use talk::broadcast::{BestEffort, BestEffortSettings};
 use talk::crypto::{Identity, KeyCard, KeyChain};
-use talk::time::sleep_schedules::{CappedExponential, Constant};
+use talk::time::sleep_schedules::Constant;
 use talk::unicast::{Acknowledgement, PushSettings, Sender};
 use tokio::sync::Mutex;
 
@@ -124,11 +124,7 @@ pub async fn dispatch(
         drop(locked_delivered);
         let push_settings = PushSettings {
             stop_condition: Acknowledgement::Strong,
-            retry_schedule: Arc::new(CappedExponential::new(
-                Duration::from_secs(1),
-                2.,
-                Duration::from_secs(10),
-            )),
+            retry_schedule: Arc::new(Constant::new(Duration::from_millis(100))),
         };
         let signature = keychain
             .sign(&Gossip(signed_msg.clone().get_message()))

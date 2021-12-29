@@ -96,6 +96,8 @@ impl Node {
                         tokio::spawn(async move {
                             deliver_gossip(keychain, m, s, gp, dg, ec, ep).await
                         });
+                    } else {
+                        my_print!(format!("Problem with Gossip : {:?}", correct));
                     }
                 }
                 // Echo
@@ -118,6 +120,8 @@ impl Node {
                         tokio::spawn(async move {
                             deliver_echo(keychain, m, identity, er, s, de, ethr, rp, rm).await
                         });
+                    } else {
+                        my_print!(format!("Problem with Echo : {:?}", correct));
                     }
                 }
                 // Ready
@@ -145,6 +149,8 @@ impl Node {
                             )
                             .await
                         });
+                    } else {
+                        my_print!(format!("Problem with Ready : {:?}", correct));
                     }
                 }
                 // GossipSubscription
@@ -162,6 +168,8 @@ impl Node {
                         tokio::spawn(async move {
                             gossip_subscription(keychain, s, identity, gp, dm).await
                         });
+                    } else {
+                        my_print!(format!("Problem with Gossip Subscription : {:?}", correct));
                     }
                 }
                 // EchoSubscription
@@ -180,15 +188,12 @@ impl Node {
                         tokio::spawn(async move {
                             echo_subscription(keychain, s, identity, ec, ep).await
                         });
+                    } else {
+                        my_print!(format!("Problem with Echo Subscription : {:?}", correct));
                     }
                 }
                 // ReadySubscription
                 5 => {
-                    /*my_print!(format!(
-                        "<{}> : Got Ready Subscription from : {:?}",
-                        self.id,
-                        identity.clone()
-                    ));*/
                     let correct = message
                         .clone()
                         .get_signature()
