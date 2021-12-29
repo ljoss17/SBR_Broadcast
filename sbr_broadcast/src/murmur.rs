@@ -6,7 +6,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use talk::broadcast::{BestEffort, BestEffortSettings};
 use talk::crypto::{Identity, KeyCard, KeyChain};
-use talk::time::sleep_schedules::CappedExponential;
+use talk::time::sleep_schedules::{CappedExponential, Constant};
 use talk::unicast::{Acknowledgement, PushSettings, Sender};
 use tokio::sync::Mutex;
 
@@ -41,18 +41,13 @@ pub async fn init(g: usize, system: Vec<KeyCard>, gossip_peers: &Arc<Mutex<Vec<I
 /// * `gossip_peers` - The Gossip peers.
 ///
 pub async fn gossip_subscribe(
-    r_w: u64,
     keychain: KeyChain,
     node_sender: Sender<SignedMessage>,
     gossip_peers: Vec<Identity>,
 ) {
     let push_settings = PushSettings {
         stop_condition: Acknowledgement::Strong,
-        retry_schedule: Arc::new(CappedExponential::new(
-            Duration::from_secs(r_w),
-            2.,
-            Duration::from_secs(100),
-        )),
+        retry_schedule: Arc::new(Constant::new(Duration::from_millis(100))),
     };
     let settings: BestEffortSettings = BestEffortSettings { push_settings };
     let msg = Message::new(3, String::from("GossipSubscription"));

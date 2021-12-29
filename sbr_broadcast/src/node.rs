@@ -5,7 +5,6 @@ use crate::message_headers::{
 };
 use crate::murmur::{deliver_gossip, dispatch, gossip_subscribe, gossip_subscription};
 use crate::sieve::{deliver_echo, echo_subscribe, echo_subscription};
-use rand::prelude::*;
 use std::collections::HashMap;
 use std::sync::Arc;
 use talk::crypto::{Identity, KeyCard, KeyChain};
@@ -213,11 +212,8 @@ impl Node {
                     let tokio_sender = sender.clone();
                     let peers = self.gossip_peers.lock().await.clone();
                     let keychain = self.kc.clone();
-                    let mut rng = rand::thread_rng();
-                    let r_w = rng.gen_range(0..50) + 1;
-                    drop(rng);
                     tokio::spawn(async move {
-                        gossip_subscribe(r_w, keychain, tokio_sender, peers).await;
+                        gossip_subscribe(keychain, tokio_sender, peers).await;
                     });
                 }
                 // Send Echo Subscriptions
@@ -225,11 +221,8 @@ impl Node {
                     let tokio_sender = sender.clone();
                     let replies = self.echo_replies.lock().await.clone();
                     let keychain = self.kc.clone();
-                    let mut rng = rand::thread_rng();
-                    let r_w = rng.gen_range(0..50) + 1;
-                    drop(rng);
                     tokio::spawn(async move {
-                        echo_subscribe(r_w, keychain, tokio_sender, replies).await;
+                        echo_subscribe(keychain, tokio_sender, replies).await;
                     });
                 }
                 // Send Ready Subscriptions
@@ -238,11 +231,8 @@ impl Node {
                     let r_replies = self.ready_replies.lock().await.clone();
                     let d_replies = self.delivery_replies.lock().await.clone();
                     let keychain = self.kc.clone();
-                    let mut rng = rand::thread_rng();
-                    let r_w = rng.gen_range(0..50) + 1;
-                    drop(rng);
                     tokio::spawn(async move {
-                        ready_subscribe(r_w, keychain, tokio_sender, r_replies, d_replies).await;
+                        ready_subscribe(keychain, tokio_sender, r_replies, d_replies).await;
                     });
                 }
                 // Trigger sender

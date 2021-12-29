@@ -44,7 +44,6 @@ pub async fn init(
 /// * `delivery_replies` - The Delivery replies used to get the Delivery peers.
 ///
 pub async fn ready_subscribe(
-    r_w: u64,
     keychain: KeyChain,
     node_sender: Sender<SignedMessage>,
     ready_replies: HashMap<Identity, Option<Message>>,
