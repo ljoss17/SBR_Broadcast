@@ -192,9 +192,19 @@ async fn setup_node(
         .await
         .unwrap();
 
-    tokio::time::sleep(std::time::Duration::from_secs(20)).await;
-
-    let keycards = client.get_shard(0).await.unwrap();
+    tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+    //let keycards = client.get_shard(0).await.unwrap();
+    let keycards: Vec<KeyCard> = loop {
+        let kc = client.get_shard(0).await;
+        match kc {
+            Ok(kcs) => {
+                break kcs;
+            }
+            Err(e) => {
+                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+            }
+        }
+    };
 
     let other_keycards = keycards
         .clone()
@@ -256,7 +266,7 @@ async fn setup_node(
 /// * `id` - The ID of the node.
 ///
 async fn send_initialisation_signals(kc: KeyCard, id: usize) {
-    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+    tokio::time::sleep(std::time::Duration::from_secs(10)).await;
     let init_keychain = KeyChain::random();
 
     let connector = Connector::new(
