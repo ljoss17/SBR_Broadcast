@@ -14,7 +14,7 @@ use crate::message::{Message, SignedMessage};
 use crate::message_headers::{Gossip, InitEcho, InitGossip, InitReady};
 use crate::node::Node;
 use std::collections::HashMap;
-use std::env;
+use std::fs;
 use talk::crypto::{Identity, KeyCard, KeyChain};
 use talk::link::rendezvous::{Client, Connector, Listener, Server, ServerSettings};
 use talk::unicast::{Receiver, Sender};
@@ -24,76 +24,62 @@ extern crate rand;
 
 #[tokio::main]
 async fn main() {
-    //println!("Begin Setup");
-    // Retrieve parameters from command line and parse them.
-    let n_str = env::args().nth(1).expect("Size of system N.");
-    let n: usize = match n_str.parse() {
-        Ok(n) => n,
-        Err(_) => {
-            println!("Expected number for first argument, got : {}", n_str);
-            return;
+    // Read config files
+    let content = fs::read_to_string("broadcast.config").expect("Error reading config file");
+    let lines = content.split("\n");
+    // Default values, if not specified in config file.
+    let mut addr: String = String::from("127.0.0.1");
+    let mut port = 4446;
+    let mut n: usize = 1;
+    let mut g: usize = 10;
+    let mut e: usize = 40;
+    let mut e_thr: usize = 10;
+    let mut r: usize = 30;
+    let mut r_thr: usize = 10;
+    let mut d: usize = 25;
+    let mut d_thr: usize = 14;
+    for line in lines {
+        let mut elems = line.split("=");
+        match elems.next().unwrap() {
+            "addr" => {
+                addr = elems.next().unwrap().to_string();
+            }
+            "port" => {
+                port = elems.next().unwrap().parse().unwrap();
+            }
+            "N" => {
+                n = elems.next().unwrap().parse().unwrap();
+            }
+            "G" => {
+                g = elems.next().unwrap().parse().unwrap();
+            }
+            "E" => {
+                e = elems.next().unwrap().parse().unwrap();
+            }
+            "E_thr" => {
+                e_thr = elems.next().unwrap().parse().unwrap();
+            }
+            "R" => {
+                r = elems.next().unwrap().parse().unwrap();
+            }
+            "R_thr" => {
+                r_thr = elems.next().unwrap().parse().unwrap();
+            }
+            "D" => {
+                d = elems.next().unwrap().parse().unwrap();
+            }
+            "D_thr" => {
+                d_thr = elems.next().unwrap().parse().unwrap();
+            }
+            _ => {
+                println!("Unknown configuration : {}", line);
+            }
         }
-    };
-    let g_str = env::args().nth(2).expect("Size of Gossip group G.");
-    let g: usize = match g_str.parse() {
-        Ok(g) => g,
-        Err(_) => {
-            println!("Expected number for second argument, got : {}", g_str);
-            return;
-        }
-    };
-    let e_str = env::args().nth(3).expect("Size of Echo group E.");
-    let e: usize = match e_str.parse() {
-        Ok(e) => e,
-        Err(_) => {
-            println!("Expected number for third argument, got : {}", e_str);
-            return;
-        }
-    };
-    let e_thr_str = env::args().nth(4).expect("Echo threshold E_thr.");
-    let e_thr: usize = match e_thr_str.parse() {
-        Ok(e_thr) => e_thr,
-        Err(_) => {
-            println!("Expected number for fourth argument, got : {}", e_thr_str);
-            return;
-        }
-    };
-    let r_str = env::args().nth(5).expect("Size of Echo group R.");
-    let r: usize = match r_str.parse() {
-        Ok(r) => r,
-        Err(_) => {
-            println!("Expected number for fifth argument, got : {}", r_str);
-            return;
-        }
-    };
-    let r_thr_str = env::args().nth(6).expect("Echo threshold R_thr.");
-    let r_thr: usize = match r_thr_str.parse() {
-        Ok(r_thr) => r_thr,
-        Err(_) => {
-            println!("Expected number for sixth argument, got : {}", r_thr_str);
-            return;
-        }
-    };
-    let d_str = env::args().nth(7).expect("Size of Echo group D.");
-    let d: usize = match d_str.parse() {
-        Ok(d) => d,
-        Err(_) => {
-            println!("Expected number for seventh argument, got : {}", d_str);
-            return;
-        }
-    };
-    let d_thr_str = env::args().nth(8).expect("Echo threshold D_thr.");
-    let d_thr: usize = match d_thr_str.parse() {
-        Ok(d_thr) => d_thr,
-        Err(_) => {
-            println!("Expected number for eighth argument, got : {}", d_thr_str);
-            return;
-        }
-    };
+    }
 
     // Start rendez-vous server
     let _server = Server::new(
-        ("127.0.0.1", 4446),
+        (addr.clone(), port),
         ServerSettings {
             shard_sizes: vec![n],
         },
@@ -104,7 +90,18 @@ async fn main() {
     // Setup N nodes.
     let mut nodes = vec![];
     for i in 0..n {
-        nodes.push(tokio::spawn(setup_node(i, g, e, e_thr, r, r_thr, d, d_thr)));
+        nodes.push(tokio::spawn(setup_node(
+            addr.clone(),
+            port,
+            i,
+            g,
+            e,
+            e_thr,
+            r,
+            r_thr,
+            d,
+            d_thr,
+        )));
     }
 
     futures::future::join_all(nodes).await;
@@ -116,18 +113,16 @@ async fn main() {
 ///
 /// # Arguments
 ///
+/// * `addr` - The adresse of the Rendez-Vous server.
+/// * `port` - The port of the Rendez-Vous server.
 /// * `id` - The Identity of the Node which will receive the signal.
 ///
-async fn trigger_send(id: Identity) {
+async fn trigger_send(addr: String, port: u16, id: Identity) {
     tokio::time::sleep(std::time::Duration::from_secs(600)).await;
     my_print!("Wait over");
     let sender_keychain = KeyChain::random();
 
-    let connector = Connector::new(
-        ("127.0.0.1", 4446),
-        sender_keychain.clone(),
-        Default::default(),
-    );
+    let connector = Connector::new((addr, port), sender_keychain.clone(), Default::default());
 
     let tmp_sender: Sender<SignedMessage> = Sender::new(connector, Default::default());
     let msg = Message::new(9, String::from("Trigger send"));
@@ -152,6 +147,8 @@ async fn trigger_send(id: Identity) {
 ///
 /// # Arguments
 ///
+/// * `addr` - The adresse of the Rendez-Vous server.
+/// * `port` - The port of the Rendez-Vous server.
 /// * `i` - The ID of the node.
 /// * `g` - The Gossip set size.
 /// * `e` - The Echo set size.
@@ -162,6 +159,8 @@ async fn trigger_send(id: Identity) {
 /// * `d_thr` - The Delivery threshold.
 ///
 async fn setup_node(
+    addr: String,
+    port: u16,
     i: usize,
     g: usize,
     e: usize,
@@ -178,14 +177,7 @@ async fn setup_node(
         node_keychain.keycard().identity().clone()
     );
 
-    let listener = Listener::new(
-        ("127.0.0.1", 4446),
-        node_keychain.clone(),
-        Default::default(),
-    )
-    .await;
-
-    let client = Client::new(("127.0.0.1", 4446), Default::default());
+    let client = Client::new((addr.clone(), port), Default::default());
 
     client
         .publish_card(node_keychain.keycard(), Some(0))
@@ -200,7 +192,7 @@ async fn setup_node(
             Ok(kcs) => {
                 break kcs;
             }
-            Err(e) => {
+            Err(_) => {
                 tokio::time::sleep(std::time::Duration::from_secs(5)).await;
             }
         }
@@ -230,13 +222,21 @@ async fn setup_node(
         .collect::<HashMap<Identity, KeyCard>>();
 
     let connector = Connector::new(
-        ("127.0.0.1", 4446),
+        (addr.clone(), port),
         node_keychain.clone(),
         Default::default(),
     );
 
     let sender = Sender::new(connector, Default::default());
+
+    let listener = Listener::new(
+        (addr.clone(), port),
+        node_keychain.clone(),
+        Default::default(),
+    )
+    .await;
     let mut receiver = Receiver::new(listener, Default::default());
+
     let node: Node = Node::new(node_keychain.clone(), map_keycards, i, e_thr, r_thr, d_thr);
     murmur::init(g, other_keycards.clone(), &node.gossip_peers).await;
     sieve::init(e, other_keycards.clone(), &node.echo_replies).await;
@@ -249,10 +249,15 @@ async fn setup_node(
     )
     .await;
     let kc: KeyChain = node_keychain.clone();
-    tokio::spawn(send_initialisation_signals(kc.keycard(), i));
+    tokio::spawn(send_initialisation_signals(
+        addr.clone(),
+        port,
+        kc.keycard(),
+        i,
+    ));
     if i == 0 {
         let tmp_id = kc.keycard().identity().clone();
-        tokio::spawn(async move { trigger_send(tmp_id).await });
+        tokio::spawn(async move { trigger_send(addr, port, tmp_id).await });
     }
     node.listen(sender, &mut receiver, kc.keycard().clone())
         .await;
@@ -262,18 +267,16 @@ async fn setup_node(
 ///
 /// # Arguments
 ///
+/// * `addr` - The adresse of the Rendez-Vous server.
+/// * `port` - The port of the Rendez-Vous server.
 /// * `kc` - The KeyCard of the node to initialise.
 /// * `id` - The ID of the node.
 ///
-async fn send_initialisation_signals(kc: KeyCard, id: usize) {
+async fn send_initialisation_signals(addr: String, port: u16, kc: KeyCard, id: usize) {
     tokio::time::sleep(std::time::Duration::from_secs(10)).await;
     let init_keychain = KeyChain::random();
 
-    let connector = Connector::new(
-        ("127.0.0.1", 4446),
-        init_keychain.clone(),
-        Default::default(),
-    );
+    let connector = Connector::new((addr, port), init_keychain.clone(), Default::default());
 
     let sender = Sender::new(connector, Default::default());
 
