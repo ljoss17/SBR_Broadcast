@@ -13,10 +13,11 @@ mod utils;
 use crate::message::{Message, SignedMessage};
 use crate::message_headers::{Gossip, InitEcho, InitGossip, InitReady};
 use crate::node::Node;
+use rand::prelude::*;
 use std::collections::HashMap;
-use std::fs;
+use std::{fs, io};
 use talk::crypto::{Identity, KeyCard, KeyChain};
-use talk::link::rendezvous::{Client, Connector, Listener, Server, ServerSettings};
+use talk::link::rendezvous::{Client, Connector, Listener};
 use talk::unicast::{Receiver, Sender};
 
 extern crate chrono;
@@ -29,8 +30,8 @@ async fn main() {
     let lines = content.split("\n");
     // Default values, if not specified in config file.
     let mut addr: String = String::from("127.0.0.1");
-    let mut port = 4446;
-    let mut n: usize = 1;
+    let mut port: u16 = 4446;
+    let mut spawn: usize = 1;
     let mut g: usize = 10;
     let mut e: usize = 40;
     let mut e_thr: usize = 10;
@@ -47,9 +48,10 @@ async fn main() {
             "port" => {
                 port = elems.next().unwrap().parse().unwrap();
             }
-            "N" => {
-                n = elems.next().unwrap().parse().unwrap();
+            "spawn" => {
+                spawn = elems.next().unwrap().parse().unwrap();
             }
+            "N" => {}
             "G" => {
                 g = elems.next().unwrap().parse().unwrap();
             }
@@ -71,26 +73,25 @@ async fn main() {
             "D_thr" => {
                 d_thr = elems.next().unwrap().parse().unwrap();
             }
+            "" => {}
             _ => {
                 println!("Unknown configuration : {}", line);
             }
         }
     }
 
-    // Start rendez-vous server
-    let _server = Server::new(
-        (addr.clone(), port),
-        ServerSettings {
-            shard_sizes: vec![n],
-        },
-    )
-    .await
-    .unwrap();
-
     // Setup N nodes.
-    let mut nodes = vec![];
-    for i in 0..n {
-        nodes.push(tokio::spawn(setup_node(
+    let mut identities = vec![];
+    for i in 0..spawn {
+        let node_keychain = KeyChain::random();
+        println!(
+            "<{}> : KC : {:?}",
+            i,
+            node_keychain.keycard().identity().clone()
+        );
+        identities.push(node_keychain.keycard().identity().clone());
+        tokio::spawn(setup_node(
+            node_keychain.clone(),
             addr.clone(),
             port,
             i,
@@ -101,52 +102,34 @@ async fn main() {
             r_thr,
             d,
             d_thr,
-        )));
+        ));
     }
 
-    futures::future::join_all(nodes).await;
-
-    println!("Main ended");
-}
-
-/// Wait for system to finish setup and then send the signal to trigger the Broadcast.
-///
-/// # Arguments
-///
-/// * `addr` - The adresse of the Rendez-Vous server.
-/// * `port` - The port of the Rendez-Vous server.
-/// * `id` - The Identity of the Node which will receive the signal.
-///
-async fn trigger_send(addr: String, port: u16, id: Identity) {
-    tokio::time::sleep(std::time::Duration::from_secs(600)).await;
-    my_print!("Wait over");
-    let sender_keychain = KeyChain::random();
-
-    let connector = Connector::new((addr, port), sender_keychain.clone(), Default::default());
-
-    let tmp_sender: Sender<SignedMessage> = Sender::new(connector, Default::default());
-    let msg = Message::new(9, String::from("Trigger send"));
-    let signature = sender_keychain.sign(&Gossip(msg.clone())).unwrap();
-    let signed_msg: SignedMessage = SignedMessage::new(msg, signature);
     loop {
-        let r = tmp_sender.send(id, signed_msg.clone()).await;
-        match r {
-            Ok(_) => {
-                println!("Sent trigger");
+        let mut input: String = String::new();
+        io::stdin().read_line(&mut input).unwrap();
+        match input.as_str() {
+            "send\n" => {
+                let mut rng = rand::thread_rng();
+                let n = rng.gen_range(0..spawn);
+                println!("chosen random n : {}", n);
+                trigger_send(addr.clone(), port, identities[n]).await;
+            }
+            "exit\n" => {
                 break;
             }
-            Err(e) => {
-                println!("ERROR : echo_subscription send : {}", e);
-                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-            }
+            _ => {}
         }
     }
+
+    println!("Main ended");
 }
 
 /// Setup and initialise a node with given parameters.
 ///
 /// # Arguments
 ///
+/// * `node_keychain` - The KeyChain of the node to setup.
 /// * `addr` - The adresse of the Rendez-Vous server.
 /// * `port` - The port of the Rendez-Vous server.
 /// * `i` - The ID of the node.
@@ -159,6 +142,7 @@ async fn trigger_send(addr: String, port: u16, id: Identity) {
 /// * `d_thr` - The Delivery threshold.
 ///
 async fn setup_node(
+    node_keychain: KeyChain,
     addr: String,
     port: u16,
     i: usize,
@@ -170,13 +154,6 @@ async fn setup_node(
     d: usize,
     d_thr: usize,
 ) {
-    let node_keychain = KeyChain::random();
-    println!(
-        "<{}> : KC : {:?}",
-        i,
-        node_keychain.keycard().identity().clone()
-    );
-
     let client = Client::new((addr.clone(), port), Default::default());
 
     client
@@ -185,7 +162,7 @@ async fn setup_node(
         .unwrap();
 
     tokio::time::sleep(std::time::Duration::from_secs(10)).await;
-    //let keycards = client.get_shard(0).await.unwrap();
+
     let keycards: Vec<KeyCard> = loop {
         let kc = client.get_shard(0).await;
         match kc {
@@ -255,10 +232,7 @@ async fn setup_node(
         kc.keycard(),
         i,
     ));
-    if i == 0 {
-        let tmp_id = kc.keycard().identity().clone();
-        tokio::spawn(async move { trigger_send(addr, port, tmp_id).await });
-    }
+
     node.listen(sender, &mut receiver, kc.keycard().clone())
         .await;
 }
@@ -346,4 +320,37 @@ async fn send_initialisation_signals(addr: String, port: u16, kc: KeyCard, id: u
             }
         }
     });
+}
+
+/// Wait for system to finish setup and then send the signal to trigger the Broadcast.
+///
+/// # Arguments
+///
+/// * `addr` - The adresse of the Rendez-Vous server.
+/// * `port` - The port of the Rendez-Vous server.
+/// * `id` - The Identity of the Node which will receive the signal.
+///
+async fn trigger_send(addr: String, port: u16, id: Identity) {
+    my_print!("Wait over");
+    let sender_keychain = KeyChain::random();
+
+    let connector = Connector::new((addr, port), sender_keychain.clone(), Default::default());
+
+    let tmp_sender: Sender<SignedMessage> = Sender::new(connector, Default::default());
+    let msg = Message::new(9, String::from("Trigger send"));
+    let signature = sender_keychain.sign(&Gossip(msg.clone())).unwrap();
+    let signed_msg: SignedMessage = SignedMessage::new(msg, signature);
+    loop {
+        let r = tmp_sender.send(id, signed_msg.clone()).await;
+        match r {
+            Ok(_) => {
+                println!("Sent trigger");
+                break;
+            }
+            Err(e) => {
+                println!("ERROR : echo_subscription send : {}", e);
+                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+            }
+        }
+    }
 }
