@@ -242,7 +242,6 @@ impl Node {
                 }
                 // Trigger sender
                 9 => {
-                    println!("Trigger sender");
                     let tokio_sender = sender.clone();
                     let keychain = self.kc.clone();
                     let msg = Message::new(0, String::from("Test message"));

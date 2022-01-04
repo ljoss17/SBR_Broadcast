@@ -25,6 +25,7 @@ extern crate rand;
 
 #[tokio::main]
 async fn main() {
+    my_print!("Start");
     // Read config files
     let content = fs::read_to_string("broadcast.config").expect("Error reading config file");
     let lines = content.split("\n");
@@ -84,11 +85,11 @@ async fn main() {
     let mut identities = vec![];
     for i in 0..spawn {
         let node_keychain = KeyChain::random();
-        println!(
+        /*println!(
             "<{}> : KC : {:?}",
             i,
             node_keychain.keycard().identity().clone()
-        );
+        );*/
         identities.push(node_keychain.keycard().identity().clone());
         tokio::spawn(setup_node(
             node_keychain.clone(),
@@ -112,7 +113,6 @@ async fn main() {
             "send\n" => {
                 let mut rng = rand::thread_rng();
                 let n = rng.gen_range(0..spawn);
-                println!("chosen random n : {}", n);
                 trigger_send(addr.clone(), port, identities[n]).await;
             }
             "exit\n" => {
@@ -121,8 +121,6 @@ async fn main() {
             _ => {}
         }
     }
-
-    println!("Main ended");
 }
 
 /// Setup and initialise a node with given parameters.
@@ -276,7 +274,6 @@ async fn send_initialisation_signals(addr: String, port: u16, kc: KeyCard, id: u
             }
         }
     });
-    tokio::time::sleep(std::time::Duration::from_secs(60)).await;
     let t_sender = sender.clone();
     let t_kc = kc.clone();
     let t_init_keychain = init_keychain.clone();
@@ -297,7 +294,6 @@ async fn send_initialisation_signals(addr: String, port: u16, kc: KeyCard, id: u
             }
         }
     });
-    tokio::time::sleep(std::time::Duration::from_secs(120)).await;
     let t_sender = sender.clone();
     let t_kc = kc.clone();
     let t_init_keychain = init_keychain.clone();
@@ -331,7 +327,7 @@ async fn send_initialisation_signals(addr: String, port: u16, kc: KeyCard, id: u
 /// * `id` - The Identity of the Node which will receive the signal.
 ///
 async fn trigger_send(addr: String, port: u16, id: Identity) {
-    my_print!("Wait over");
+    my_print!("Trigger send");
     let sender_keychain = KeyChain::random();
 
     let connector = Connector::new((addr, port), sender_keychain.clone(), Default::default());
@@ -344,7 +340,6 @@ async fn trigger_send(addr: String, port: u16, id: Identity) {
         let r = tmp_sender.send(id, signed_msg.clone()).await;
         match r {
             Ok(_) => {
-                println!("Sent trigger");
                 break;
             }
             Err(e) => {
