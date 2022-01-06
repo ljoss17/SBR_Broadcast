@@ -46,3 +46,7 @@ To initiate the dispatch of a Message by a random process, run the command :
 ```
 send
 ```
+
+## Documentation
+
+The documentation for the code can be found [here](https://ljoss17.github.io/SBR_Broadcast/sbr_broadcast/).
