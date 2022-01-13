@@ -11,6 +11,17 @@ Cargo.lock
 
 # Ignore check folder
 check/
+check_*/
+
+# Ignore logging files and folders
+settings*/
 *.log
 *.txt
 *.parsed
+
+# Ignore Syrupy folder
+resources*/
+syrupy*
+
+# Ignore MacOS generated files
+.DS_Store

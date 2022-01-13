@@ -188,7 +188,6 @@ pub async fn deliver_ready(
         let mut locked_ready_replies = ready_replies.lock().await;
         locked_ready_replies.insert(from, new_reply.clone());
         drop(locked_ready_replies);
-        let ready_replies: HashMap<Identity, Option<Message>> = ready_replies.lock().await.clone();
         if new_ready {
             tokio::spawn(async move {
                 check_ready(
@@ -214,8 +213,6 @@ pub async fn deliver_ready(
         let mut locked_delivery_replies = delivery_replies.lock().await;
         locked_delivery_replies.insert(from, new_reply.clone());
         drop(locked_delivery_replies);
-        let delivery_replies: HashMap<Identity, Option<Message>> =
-            delivery_replies.lock().await.clone();
         if new_delivery {
             check_delivery(id, from, d_thr, delivered, delivery_replies).await;
         }
@@ -241,8 +238,9 @@ async fn check_ready(
     ready_messages: Arc<Mutex<Vec<Message>>>,
     r_thr: usize,
     ready_subscribers: Vec<Identity>,
-    ready_replies: HashMap<Identity, Option<Message>>,
+    ready_replies: Arc<Mutex<HashMap<Identity, Option<Message>>>>,
 ) {
+    let ready_replies: HashMap<Identity, Option<Message>> = ready_replies.lock().await.clone();
     if ready_replies
         .clone()
         .into_keys()
@@ -291,8 +289,10 @@ async fn check_delivery(
     from: Identity,
     d_thr: usize,
     delivered: Arc<Mutex<Option<Message>>>,
-    delivery_replies: HashMap<Identity, Option<Message>>,
+    delivery_replies: Arc<Mutex<HashMap<Identity, Option<Message>>>>,
 ) {
+    let delivery_replies: HashMap<Identity, Option<Message>> =
+        delivery_replies.lock().await.clone();
     if delivery_replies
         .clone()
         .into_keys()

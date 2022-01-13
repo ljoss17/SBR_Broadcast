@@ -88,8 +88,7 @@ impl Node {
                         let gp = self.gossip_peers.lock().await.clone();
                         let dg = self.delivered_gossip.clone();
                         let ec = self.echo.clone();
-                        let ep: Vec<Identity> =
-                            self.echo_replies.lock().await.clone().into_keys().collect();
+                        let ep = self.echo_subscribers.lock().await.clone();
                         let m = message.clone();
                         let s = sender.clone();
                         let keychain = self.kc.clone();

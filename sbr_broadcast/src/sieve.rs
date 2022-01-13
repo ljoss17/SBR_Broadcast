@@ -169,15 +169,14 @@ pub async fn deliver_echo(
             drop(locked_replies);
         }
 
-        let echo_replies: HashMap<Identity, Option<Message>> = echo_replies.lock().await.clone();
         check_echoes(
-            keychain,
-            node_sender,
-            delivered_echo,
+            keychain.clone(),
+            node_sender.clone(),
+            delivered_echo.clone(),
             e_thr,
-            ready_peers,
+            ready_peers.clone(),
             echo_replies,
-            ready_messages,
+            ready_messages.clone(),
         )
         .await;
     }
@@ -201,10 +200,11 @@ pub async fn check_echoes(
     delivered_echo: Arc<Mutex<Option<Message>>>,
     e_thr: usize,
     ready_peers: Vec<Identity>,
-    echo_replies: HashMap<Identity, Option<Message>>,
+    echo_replies: Arc<Mutex<HashMap<Identity, Option<Message>>>>,
     ready_messages: Arc<Mutex<Vec<Message>>>,
 ) {
     if delivered_echo.lock().await.is_none() {
+        let echo_replies: HashMap<Identity, Option<Message>> = echo_replies.lock().await.clone();
         let occ = check_message_occurrences(echo_replies);
         for m in occ {
             if m.1 >= e_thr {

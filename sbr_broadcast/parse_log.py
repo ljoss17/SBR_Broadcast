@@ -17,7 +17,7 @@ lines = f.readlines()
 
 identities = {}
 
-for i in range(args.n):
+for i in range(1, args.n):
     line = lines[i].split("<", 1)[1].split(">")
     id = line[1].split(" : KC : Identity(")[1].replace(")\n", "")
     identities[id] = line[0]
