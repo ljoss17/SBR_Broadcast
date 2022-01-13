@@ -70,10 +70,10 @@ pub async fn gossip_subscribe(
 /// * `keychain` - KeyChain used to sign the Message.
 /// * `signed_msg` - The signed Message to deliver.
 /// * `node_sender` - The Node's Sender used to send Messages.
-/// * `gossip_peers` - The peers to which the Gossip will be spread.
+/// * `gossip_peers` - The Gossip peers.
 /// * `delivered_gossip` - The Atomic Reference Counter to the status of the delivered Gossip Message.
 /// * `echo` - The Atomic Reference Counter to the status of the Echo Message (used by Sieve).
-/// * `echo_peers` - The echo peers (used by Sieve).
+/// * `echo_peers` - The Echo peers (used by Sieve).
 ///
 pub async fn deliver_gossip(
     keychain: KeyChain,
@@ -107,7 +107,7 @@ pub async fn deliver_gossip(
 /// * `peers` - The peers to which the Gossip will be spread.
 /// * `delivered_gossip` - The Atomic Reference Counter to the status of the delivered Gossip Message.
 /// * `echo` - The Atomic Reference Counter to the status of the Echo Message (used by Sieve).
-/// * `echo_peers` - The echo peers (used by Sieve).
+/// * `echo_peers` - The Echo peers (used by Sieve).
 ///
 pub async fn dispatch(
     keychain: KeyChain,
@@ -150,7 +150,7 @@ pub async fn dispatch(
 /// * `keychain` - KeyChain used to sign the Message.
 /// * `node_sender` - The Node's Sender used to send Messages.
 /// * `from` - The Identity of the Node subscribing.
-/// * `gossip_peers` - The Atomic Reference Counter to the peers to which the Gossip will be spread.
+/// * `gossip_peers` - The Atomic Reference Counter to the Gossip peers.
 /// * `delivered_gossip` - The status of the delivered Gossip Message.
 ///
 pub async fn gossip_subscription(

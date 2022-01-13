@@ -149,6 +149,7 @@ pub async fn deliver(
 /// * `delivered_echo` - The Atomic Reference Counter to the status of the delivered Echo Message.
 /// * `e_thr` - The threshold defining if enough Echo replies have been received.
 /// * `ready_peers` - The Ready peers (used by Contagion).
+/// * `ready_messages` - The Atomic Reference Counter to the vector of all Messages which are ready.
 ///
 pub async fn deliver_echo(
     keychain: KeyChain,
@@ -193,6 +194,7 @@ pub async fn deliver_echo(
 /// * `e_thr` - The threshold defining if enough Echo replies have been received.
 /// * `ready_peers` - The Ready peers (used by Contagion).
 /// * `echo_replies` - The Echo replies received.
+/// * `ready_messages` - The Atomic Reference Counter to the vector of all Messages which are ready.
 ///
 pub async fn check_echoes(
     keychain: KeyChain,

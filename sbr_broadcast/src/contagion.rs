@@ -81,7 +81,7 @@ pub async fn ready_subscribe(
 /// * `node_sender` - The Node's Sender used to send Messages.
 /// * `from` - The Identity of the Node subscribing.
 /// * `ready_messages` - Vector of all Messages which are ready.
-/// * `ready_subscribers` - The Atomic Reference Counter the Ready peers subscribed to this Node.
+/// * `ready_subscribers` - The Atomic Reference Counter to the Ready peers subscribed to this Node.
 ///
 pub async fn ready_subscription(
     keychain: KeyChain,
@@ -115,7 +115,8 @@ pub async fn ready_subscription(
 /// * `keychain` - KeyChain used to sign the Message.
 /// * `message` - The received Message.
 /// * `node_sender` - The Node's Sender used to send the Gossip Subscription to the peers.
-/// * `ready_subscribers` - The Atomic Reference Counter the Ready peers subscribed to this Node.
+/// * `ready_subscribers` - The Ready peers subscribed to this Node.
+/// * `ready_messages` - The Atomic Reference Counter to the vector of all Messages which are ready.
 ///
 pub async fn deliver(
     keychain: KeyChain,
@@ -150,13 +151,12 @@ pub async fn deliver(
 /// # Arguments
 ///
 /// * `keychain` - KeyChain used to sign the Message.
-/// * `kc` - The KeyCard of the sender, used to verify the Message signature.
 /// * `id` - The id of the running Node, used for debug purpose.
 /// * `signed_msg` - The signed Message to deliver.
 /// * `from` - The Identity of the Node sending the Ready.
 /// * `ready_subscribers` - The Ready peers subscribed to this Node.
-/// * `ready_replies` - The Atomic Reference Counter the Ready replies to update.
-/// * `delivery_replies` - The Atomic Reference Counter the Delivery replies to update.
+/// * `ready_replies` - The Atomic Reference Counter to the Ready replies to update.
+/// * `delivery_replies` - The Atomic Reference Counter to the Delivery replies to update.
 /// * `node_sender` - The Node's Sender used to send the Gossip Subscription to the peers.
 /// * `ready_messages` - The Atomic Reference Counter to the Messages which are Ready.
 /// * `r_thr` - The threshold defining if enough Ready replies have been received.
@@ -225,11 +225,12 @@ pub async fn deliver_ready(
 /// # Arguments
 ///
 /// * `keychain` - KeyChain used to sign the Message.
+/// * `from` - The Identity of the Node sending the Ready.
 /// * `node_sender` - The Node's Sender used to send the Gossip Subscription to the peers.
-/// * `ready_messages` - The Atomic Reference Counter to vector of all Messages which are ready.
+/// * `ready_messages` - The Atomic Reference Counter to the vector of all Messages which are ready.
 /// * `r_thr` - The threshold defining if enough Ready replies have been received.
 /// * `ready_subscribers` - The Ready peers subscribed to this Node.
-/// * `ready_replies` - The Ready replies from the chosen peers.
+/// * `ready_replies` - The Atomic Reference Counter to the Ready replies from the chosen peers.
 ///
 async fn check_ready(
     keychain: KeyChain,
@@ -280,9 +281,10 @@ async fn check_ready(
 /// # Arguments
 ///
 /// * `id` - The id of the running Node, used for debug purpose.
+/// * `from` - The Identity of the Node sending the Ready.
 /// * `d_thr` - The threshold defining if enough Delivery replies have been received.
-/// * `delivered` - The Atomic Reference Counter the delivered Message.
-/// * `delivery_replies` - The Delivery replies from the chosen peers.
+/// * `delivered` - The Atomic Reference Counter to the delivered Message.
+/// * `delivery_replies` - The Atomic Reference Counter to the delivery replies from the chosen peers.
 ///
 async fn check_delivery(
     id: usize,
