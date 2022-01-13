@@ -1,1 +1,1 @@
-window.ALL_CRATES = ["sbr_broadcast"];
+window.ALL_CRATES = ["rendezvous","sbr_broadcast"];

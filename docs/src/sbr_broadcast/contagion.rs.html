@@ -350,6 +350,8 @@
 <span id="350">350</span>
 <span id="351">351</span>
 <span id="352">352</span>
+<span id="353">353</span>
+<span id="354">354</span>
 </pre><pre class="rust"><code><span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::message</span>::{<span class="ident">Message</span>, <span class="ident">SignedMessage</span>};
 <span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::message_headers</span>::{<span class="ident">Ready</span>, <span class="ident">ReadySubscription</span>};
 <span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::utils</span>::{<span class="ident">check_message_occurrences</span>, <span class="ident">sample</span>};
@@ -433,7 +435,7 @@
 <span class="doccomment">/// * `node_sender` - The Node&#39;s Sender used to send Messages.</span>
 <span class="doccomment">/// * `from` - The Identity of the Node subscribing.</span>
 <span class="doccomment">/// * `ready_messages` - Vector of all Messages which are ready.</span>
-<span class="doccomment">/// * `ready_subscribers` - The Atomic Reference Counter the Ready peers subscribed to this Node.</span>
+<span class="doccomment">/// * `ready_subscribers` - The Atomic Reference Counter to the Ready peers subscribed to this Node.</span>
 <span class="doccomment">///</span>
 <span class="kw">pub</span> <span class="kw">async</span> <span class="kw">fn</span> <span class="ident">ready_subscription</span>(
     <span class="ident">keychain</span>: <span class="ident">KeyChain</span>,
@@ -467,7 +469,8 @@
 <span class="doccomment">/// * `keychain` - KeyChain used to sign the Message.</span>
 <span class="doccomment">/// * `message` - The received Message.</span>
 <span class="doccomment">/// * `node_sender` - The Node&#39;s Sender used to send the Gossip Subscription to the peers.</span>
-<span class="doccomment">/// * `ready_subscribers` - The Atomic Reference Counter the Ready peers subscribed to this Node.</span>
+<span class="doccomment">/// * `ready_subscribers` - The Ready peers subscribed to this Node.</span>
+<span class="doccomment">/// * `ready_messages` - The Atomic Reference Counter to the vector of all Messages which are ready.</span>
 <span class="doccomment">///</span>
 <span class="kw">pub</span> <span class="kw">async</span> <span class="kw">fn</span> <span class="ident">deliver</span>(
     <span class="ident">keychain</span>: <span class="ident">KeyChain</span>,
@@ -502,13 +505,12 @@
 <span class="doccomment">/// # Arguments</span>
 <span class="doccomment">///</span>
 <span class="doccomment">/// * `keychain` - KeyChain used to sign the Message.</span>
-<span class="doccomment">/// * `kc` - The KeyCard of the sender, used to verify the Message signature.</span>
 <span class="doccomment">/// * `id` - The id of the running Node, used for debug purpose.</span>
 <span class="doccomment">/// * `signed_msg` - The signed Message to deliver.</span>
 <span class="doccomment">/// * `from` - The Identity of the Node sending the Ready.</span>
 <span class="doccomment">/// * `ready_subscribers` - The Ready peers subscribed to this Node.</span>
-<span class="doccomment">/// * `ready_replies` - The Atomic Reference Counter the Ready replies to update.</span>
-<span class="doccomment">/// * `delivery_replies` - The Atomic Reference Counter the Delivery replies to update.</span>
+<span class="doccomment">/// * `ready_replies` - The Atomic Reference Counter to the Ready replies to update.</span>
+<span class="doccomment">/// * `delivery_replies` - The Atomic Reference Counter to the Delivery replies to update.</span>
 <span class="doccomment">/// * `node_sender` - The Node&#39;s Sender used to send the Gossip Subscription to the peers.</span>
 <span class="doccomment">/// * `ready_messages` - The Atomic Reference Counter to the Messages which are Ready.</span>
 <span class="doccomment">/// * `r_thr` - The threshold defining if enough Ready replies have been received.</span>
@@ -540,7 +542,6 @@
         <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">locked_ready_replies</span> <span class="op">=</span> <span class="ident">ready_replies</span>.<span class="ident">lock</span>().<span class="kw">await</span>;
         <span class="ident">locked_ready_replies</span>.<span class="ident">insert</span>(<span class="ident">from</span>, <span class="ident">new_reply</span>.<span class="ident">clone</span>());
         <span class="ident">drop</span>(<span class="ident">locked_ready_replies</span>);
-        <span class="kw">let</span> <span class="ident">ready_replies</span>: <span class="ident">HashMap</span><span class="op">&lt;</span><span class="ident">Identity</span>, <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">Message</span><span class="op">&gt;</span><span class="op">&gt;</span> <span class="op">=</span> <span class="ident">ready_replies</span>.<span class="ident">lock</span>().<span class="kw">await</span>.<span class="ident">clone</span>();
         <span class="kw">if</span> <span class="ident">new_ready</span> {
             <span class="ident">tokio::spawn</span>(<span class="kw">async</span> <span class="kw">move</span> {
                 <span class="ident">check_ready</span>(
@@ -566,8 +567,6 @@
         <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">locked_delivery_replies</span> <span class="op">=</span> <span class="ident">delivery_replies</span>.<span class="ident">lock</span>().<span class="kw">await</span>;
         <span class="ident">locked_delivery_replies</span>.<span class="ident">insert</span>(<span class="ident">from</span>, <span class="ident">new_reply</span>.<span class="ident">clone</span>());
         <span class="ident">drop</span>(<span class="ident">locked_delivery_replies</span>);
-        <span class="kw">let</span> <span class="ident">delivery_replies</span>: <span class="ident">HashMap</span><span class="op">&lt;</span><span class="ident">Identity</span>, <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">Message</span><span class="op">&gt;</span><span class="op">&gt;</span> <span class="op">=</span>
-            <span class="ident">delivery_replies</span>.<span class="ident">lock</span>().<span class="kw">await</span>.<span class="ident">clone</span>();
         <span class="kw">if</span> <span class="ident">new_delivery</span> {
             <span class="ident">check_delivery</span>(<span class="ident">id</span>, <span class="ident">from</span>, <span class="ident">d_thr</span>, <span class="ident">delivered</span>, <span class="ident">delivery_replies</span>).<span class="kw">await</span>;
         }
@@ -580,11 +579,12 @@
 <span class="doccomment">/// # Arguments</span>
 <span class="doccomment">///</span>
 <span class="doccomment">/// * `keychain` - KeyChain used to sign the Message.</span>
+<span class="doccomment">/// * `from` - The Identity of the Node sending the Ready.</span>
 <span class="doccomment">/// * `node_sender` - The Node&#39;s Sender used to send the Gossip Subscription to the peers.</span>
-<span class="doccomment">/// * `ready_messages` - The Atomic Reference Counter to vector of all Messages which are ready.</span>
+<span class="doccomment">/// * `ready_messages` - The Atomic Reference Counter to the vector of all Messages which are ready.</span>
 <span class="doccomment">/// * `r_thr` - The threshold defining if enough Ready replies have been received.</span>
 <span class="doccomment">/// * `ready_subscribers` - The Ready peers subscribed to this Node.</span>
-<span class="doccomment">/// * `ready_replies` - The Ready replies from the chosen peers.</span>
+<span class="doccomment">/// * `ready_replies` - The Atomic Reference Counter to the Ready replies from the chosen peers.</span>
 <span class="doccomment">///</span>
 <span class="kw">async</span> <span class="kw">fn</span> <span class="ident">check_ready</span>(
     <span class="ident">keychain</span>: <span class="ident">KeyChain</span>,
@@ -593,8 +593,9 @@
     <span class="ident">ready_messages</span>: <span class="ident">Arc</span><span class="op">&lt;</span><span class="ident">Mutex</span><span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">Message</span><span class="op">&gt;</span><span class="op">&gt;</span><span class="op">&gt;</span>,
     <span class="ident">r_thr</span>: <span class="ident">usize</span>,
     <span class="ident">ready_subscribers</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">Identity</span><span class="op">&gt;</span>,
-    <span class="ident">ready_replies</span>: <span class="ident">HashMap</span><span class="op">&lt;</span><span class="ident">Identity</span>, <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">Message</span><span class="op">&gt;</span><span class="op">&gt;</span>,
+    <span class="ident">ready_replies</span>: <span class="ident">Arc</span><span class="op">&lt;</span><span class="ident">Mutex</span><span class="op">&lt;</span><span class="ident">HashMap</span><span class="op">&lt;</span><span class="ident">Identity</span>, <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">Message</span><span class="op">&gt;</span><span class="op">&gt;</span><span class="op">&gt;</span><span class="op">&gt;</span>,
 ) {
+    <span class="kw">let</span> <span class="ident">ready_replies</span>: <span class="ident">HashMap</span><span class="op">&lt;</span><span class="ident">Identity</span>, <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">Message</span><span class="op">&gt;</span><span class="op">&gt;</span> <span class="op">=</span> <span class="ident">ready_replies</span>.<span class="ident">lock</span>().<span class="kw">await</span>.<span class="ident">clone</span>();
     <span class="kw">if</span> <span class="ident">ready_replies</span>
         .<span class="ident">clone</span>()
         .<span class="ident">into_keys</span>()
@@ -634,17 +635,20 @@
 <span class="doccomment">/// # Arguments</span>
 <span class="doccomment">///</span>
 <span class="doccomment">/// * `id` - The id of the running Node, used for debug purpose.</span>
+<span class="doccomment">/// * `from` - The Identity of the Node sending the Ready.</span>
 <span class="doccomment">/// * `d_thr` - The threshold defining if enough Delivery replies have been received.</span>
-<span class="doccomment">/// * `delivered` - The Atomic Reference Counter the delivered Message.</span>
-<span class="doccomment">/// * `delivery_replies` - The Delivery replies from the chosen peers.</span>
+<span class="doccomment">/// * `delivered` - The Atomic Reference Counter to the delivered Message.</span>
+<span class="doccomment">/// * `delivery_replies` - The Atomic Reference Counter to the delivery replies from the chosen peers.</span>
 <span class="doccomment">///</span>
 <span class="kw">async</span> <span class="kw">fn</span> <span class="ident">check_delivery</span>(
     <span class="ident">id</span>: <span class="ident">usize</span>,
     <span class="ident">from</span>: <span class="ident">Identity</span>,
     <span class="ident">d_thr</span>: <span class="ident">usize</span>,
     <span class="ident">delivered</span>: <span class="ident">Arc</span><span class="op">&lt;</span><span class="ident">Mutex</span><span class="op">&lt;</span><span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">Message</span><span class="op">&gt;</span><span class="op">&gt;</span><span class="op">&gt;</span>,
-    <span class="ident">delivery_replies</span>: <span class="ident">HashMap</span><span class="op">&lt;</span><span class="ident">Identity</span>, <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">Message</span><span class="op">&gt;</span><span class="op">&gt;</span>,
+    <span class="ident">delivery_replies</span>: <span class="ident">Arc</span><span class="op">&lt;</span><span class="ident">Mutex</span><span class="op">&lt;</span><span class="ident">HashMap</span><span class="op">&lt;</span><span class="ident">Identity</span>, <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">Message</span><span class="op">&gt;</span><span class="op">&gt;</span><span class="op">&gt;</span><span class="op">&gt;</span>,
 ) {
+    <span class="kw">let</span> <span class="ident">delivery_replies</span>: <span class="ident">HashMap</span><span class="op">&lt;</span><span class="ident">Identity</span>, <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">Message</span><span class="op">&gt;</span><span class="op">&gt;</span> <span class="op">=</span>
+        <span class="ident">delivery_replies</span>.<span class="ident">lock</span>().<span class="kw">await</span>.<span class="ident">clone</span>();
     <span class="kw">if</span> <span class="ident">delivery_replies</span>
         .<span class="ident">clone</span>()
         .<span class="ident">into_keys</span>()

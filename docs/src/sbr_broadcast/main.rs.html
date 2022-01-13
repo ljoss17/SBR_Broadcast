@@ -347,6 +347,8 @@
 <span id="347">347</span>
 <span id="348">348</span>
 <span id="349">349</span>
+<span id="350">350</span>
+<span id="351">351</span>
 </pre><pre class="rust"><code><span class="attribute">#![<span class="ident">crate_name</span> <span class="op">=</span> <span class="string">&quot;sbr_broadcast&quot;</span>]</span>
 
 <span class="attribute">#[<span class="ident">macro_use</span>]</span>
@@ -362,10 +364,11 @@
 <span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::message</span>::{<span class="ident">Message</span>, <span class="ident">SignedMessage</span>};
 <span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::message_headers</span>::{<span class="ident">Gossip</span>, <span class="ident">InitEcho</span>, <span class="ident">InitGossip</span>, <span class="ident">InitReady</span>};
 <span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::node::Node</span>;
+<span class="kw">use</span> <span class="ident">rand::prelude</span>::<span class="kw-2">*</span>;
 <span class="kw">use</span> <span class="ident">std::collections::HashMap</span>;
-<span class="kw">use</span> <span class="ident">std::fs</span>;
+<span class="kw">use</span> <span class="ident">std</span>::{<span class="ident">fs</span>, <span class="ident">io</span>};
 <span class="kw">use</span> <span class="ident">talk::crypto</span>::{<span class="ident">Identity</span>, <span class="ident">KeyCard</span>, <span class="ident">KeyChain</span>};
-<span class="kw">use</span> <span class="ident">talk::link::rendezvous</span>::{<span class="ident">Client</span>, <span class="ident">Connector</span>, <span class="ident">Listener</span>, <span class="ident">Server</span>, <span class="ident">ServerSettings</span>};
+<span class="kw">use</span> <span class="ident">talk::link::rendezvous</span>::{<span class="ident">Client</span>, <span class="ident">Connector</span>, <span class="ident">Listener</span>};
 <span class="kw">use</span> <span class="ident">talk::unicast</span>::{<span class="ident">Receiver</span>, <span class="ident">Sender</span>};
 
 <span class="kw">extern</span> <span class="kw">crate</span> <span class="ident">chrono</span>;
@@ -373,13 +376,14 @@
 
 <span class="attribute">#[<span class="ident">tokio::main</span>]</span>
 <span class="kw">async</span> <span class="kw">fn</span> <span class="ident">main</span>() {
+    <span class="macro">my_print!</span>(<span class="string">&quot;Start&quot;</span>);
     <span class="comment">// Read config files</span>
     <span class="kw">let</span> <span class="ident">content</span> <span class="op">=</span> <span class="ident">fs::read_to_string</span>(<span class="string">&quot;broadcast.config&quot;</span>).<span class="ident">expect</span>(<span class="string">&quot;Error reading config file&quot;</span>);
     <span class="kw">let</span> <span class="ident">lines</span> <span class="op">=</span> <span class="ident">content</span>.<span class="ident">split</span>(<span class="string">&quot;\n&quot;</span>);
     <span class="comment">// Default values, if not specified in config file.</span>
     <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">addr</span>: <span class="ident">String</span> <span class="op">=</span> <span class="ident">String::from</span>(<span class="string">&quot;127.0.0.1&quot;</span>);
-    <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">port</span> <span class="op">=</span> <span class="number">4446</span>;
-    <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">n</span>: <span class="ident">usize</span> <span class="op">=</span> <span class="number">1</span>;
+    <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">port</span>: <span class="ident">u16</span> <span class="op">=</span> <span class="number">4446</span>;
+    <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">spawn</span>: <span class="ident">usize</span> <span class="op">=</span> <span class="number">1</span>;
     <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">g</span>: <span class="ident">usize</span> <span class="op">=</span> <span class="number">10</span>;
     <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">e</span>: <span class="ident">usize</span> <span class="op">=</span> <span class="number">40</span>;
     <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">e_thr</span>: <span class="ident">usize</span> <span class="op">=</span> <span class="number">10</span>;
@@ -396,9 +400,10 @@
             <span class="string">&quot;port&quot;</span> <span class="op">=</span><span class="op">&gt;</span> {
                 <span class="ident">port</span> <span class="op">=</span> <span class="ident">elems</span>.<span class="ident">next</span>().<span class="ident">unwrap</span>().<span class="ident">parse</span>().<span class="ident">unwrap</span>();
             }
-            <span class="string">&quot;N&quot;</span> <span class="op">=</span><span class="op">&gt;</span> {
-                <span class="ident">n</span> <span class="op">=</span> <span class="ident">elems</span>.<span class="ident">next</span>().<span class="ident">unwrap</span>().<span class="ident">parse</span>().<span class="ident">unwrap</span>();
+            <span class="string">&quot;spawn&quot;</span> <span class="op">=</span><span class="op">&gt;</span> {
+                <span class="ident">spawn</span> <span class="op">=</span> <span class="ident">elems</span>.<span class="ident">next</span>().<span class="ident">unwrap</span>().<span class="ident">parse</span>().<span class="ident">unwrap</span>();
             }
+            <span class="string">&quot;N&quot;</span> <span class="op">=</span><span class="op">&gt;</span> {}
             <span class="string">&quot;G&quot;</span> <span class="op">=</span><span class="op">&gt;</span> {
                 <span class="ident">g</span> <span class="op">=</span> <span class="ident">elems</span>.<span class="ident">next</span>().<span class="ident">unwrap</span>().<span class="ident">parse</span>().<span class="ident">unwrap</span>();
             }
@@ -420,26 +425,25 @@
             <span class="string">&quot;D_thr&quot;</span> <span class="op">=</span><span class="op">&gt;</span> {
                 <span class="ident">d_thr</span> <span class="op">=</span> <span class="ident">elems</span>.<span class="ident">next</span>().<span class="ident">unwrap</span>().<span class="ident">parse</span>().<span class="ident">unwrap</span>();
             }
+            <span class="string">&quot;&quot;</span> <span class="op">=</span><span class="op">&gt;</span> {}
             <span class="kw">_</span> <span class="op">=</span><span class="op">&gt;</span> {
                 <span class="macro">println!</span>(<span class="string">&quot;Unknown configuration : {}&quot;</span>, <span class="ident">line</span>);
             }
         }
     }
 
-    <span class="comment">// Start rendez-vous server</span>
-    <span class="kw">let</span> <span class="ident">_server</span> <span class="op">=</span> <span class="ident">Server::new</span>(
-        (<span class="ident">addr</span>.<span class="ident">clone</span>(), <span class="ident">port</span>),
-        <span class="ident">ServerSettings</span> {
-            <span class="ident">shard_sizes</span>: <span class="macro">vec!</span>[<span class="ident">n</span>],
-        },
-    )
-    .<span class="kw">await</span>
-    .<span class="ident">unwrap</span>();
-
     <span class="comment">// Setup N nodes.</span>
-    <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">nodes</span> <span class="op">=</span> <span class="macro">vec!</span>[];
-    <span class="kw">for</span> <span class="ident">i</span> <span class="kw">in</span> <span class="number">0</span>..<span class="ident">n</span> {
-        <span class="ident">nodes</span>.<span class="ident">push</span>(<span class="ident">tokio::spawn</span>(<span class="ident">setup_node</span>(
+    <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">identities</span> <span class="op">=</span> <span class="macro">vec!</span>[];
+    <span class="kw">for</span> <span class="ident">i</span> <span class="kw">in</span> <span class="number">0</span>..<span class="ident">spawn</span> {
+        <span class="kw">let</span> <span class="ident">node_keychain</span> <span class="op">=</span> <span class="ident">KeyChain::random</span>();
+        <span class="comment">/*println!(
+            &quot;&lt;{}&gt; : KC : {:?}&quot;,
+            i,
+            node_keychain.keycard().identity().clone()
+        );*/</span>
+        <span class="ident">identities</span>.<span class="ident">push</span>(<span class="ident">node_keychain</span>.<span class="ident">keycard</span>().<span class="ident">identity</span>().<span class="ident">clone</span>());
+        <span class="ident">tokio::spawn</span>(<span class="ident">setup_node</span>(
+            <span class="ident">node_keychain</span>.<span class="ident">clone</span>(),
             <span class="ident">addr</span>.<span class="ident">clone</span>(),
             <span class="ident">port</span>,
             <span class="ident">i</span>,
@@ -450,44 +454,22 @@
             <span class="ident">r_thr</span>,
             <span class="ident">d</span>,
             <span class="ident">d_thr</span>,
-        )));
+        ));
     }
 
-    <span class="ident">futures::future::join_all</span>(<span class="ident">nodes</span>).<span class="kw">await</span>;
-
-    <span class="macro">println!</span>(<span class="string">&quot;Main ended&quot;</span>);
-}
-
-<span class="doccomment">/// Wait for system to finish setup and then send the signal to trigger the Broadcast.</span>
-<span class="doccomment">///</span>
-<span class="doccomment">/// # Arguments</span>
-<span class="doccomment">///</span>
-<span class="doccomment">/// * `addr` - The adresse of the Rendez-Vous server.</span>
-<span class="doccomment">/// * `port` - The port of the Rendez-Vous server.</span>
-<span class="doccomment">/// * `id` - The Identity of the Node which will receive the signal.</span>
-<span class="doccomment">///</span>
-<span class="kw">async</span> <span class="kw">fn</span> <span class="ident">trigger_send</span>(<span class="ident">addr</span>: <span class="ident">String</span>, <span class="ident">port</span>: <span class="ident">u16</span>, <span class="ident">id</span>: <span class="ident">Identity</span>) {
-    <span class="ident">tokio::time::sleep</span>(<span class="ident">std::time::Duration::from_secs</span>(<span class="number">600</span>)).<span class="kw">await</span>;
-    <span class="macro">my_print!</span>(<span class="string">&quot;Wait over&quot;</span>);
-    <span class="kw">let</span> <span class="ident">sender_keychain</span> <span class="op">=</span> <span class="ident">KeyChain::random</span>();
-
-    <span class="kw">let</span> <span class="ident">connector</span> <span class="op">=</span> <span class="ident">Connector::new</span>((<span class="ident">addr</span>, <span class="ident">port</span>), <span class="ident">sender_keychain</span>.<span class="ident">clone</span>(), <span class="ident">Default::default</span>());
-
-    <span class="kw">let</span> <span class="ident">tmp_sender</span>: <span class="ident">Sender</span><span class="op">&lt;</span><span class="ident">SignedMessage</span><span class="op">&gt;</span> <span class="op">=</span> <span class="ident">Sender::new</span>(<span class="ident">connector</span>, <span class="ident">Default::default</span>());
-    <span class="kw">let</span> <span class="ident">msg</span> <span class="op">=</span> <span class="ident">Message::new</span>(<span class="number">9</span>, <span class="ident">String::from</span>(<span class="string">&quot;Trigger send&quot;</span>));
-    <span class="kw">let</span> <span class="ident">signature</span> <span class="op">=</span> <span class="ident">sender_keychain</span>.<span class="ident">sign</span>(<span class="kw-2">&amp;</span><span class="ident">Gossip</span>(<span class="ident">msg</span>.<span class="ident">clone</span>())).<span class="ident">unwrap</span>();
-    <span class="kw">let</span> <span class="ident">signed_msg</span>: <span class="ident">SignedMessage</span> <span class="op">=</span> <span class="ident">SignedMessage::new</span>(<span class="ident">msg</span>, <span class="ident">signature</span>);
     <span class="kw">loop</span> {
-        <span class="kw">let</span> <span class="ident">r</span> <span class="op">=</span> <span class="ident">tmp_sender</span>.<span class="ident">send</span>(<span class="ident">id</span>, <span class="ident">signed_msg</span>.<span class="ident">clone</span>()).<span class="kw">await</span>;
-        <span class="kw">match</span> <span class="ident">r</span> {
-            <span class="prelude-val">Ok</span>(<span class="kw">_</span>) <span class="op">=</span><span class="op">&gt;</span> {
-                <span class="macro">println!</span>(<span class="string">&quot;Sent trigger&quot;</span>);
+        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">input</span>: <span class="ident">String</span> <span class="op">=</span> <span class="ident">String::new</span>();
+        <span class="ident">io::stdin</span>().<span class="ident">read_line</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">input</span>).<span class="ident">unwrap</span>();
+        <span class="kw">match</span> <span class="ident">input</span>.<span class="ident">as_str</span>() {
+            <span class="string">&quot;send\n&quot;</span> <span class="op">=</span><span class="op">&gt;</span> {
+                <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">rng</span> <span class="op">=</span> <span class="ident">rand::thread_rng</span>();
+                <span class="kw">let</span> <span class="ident">n</span> <span class="op">=</span> <span class="ident">rng</span>.<span class="ident">gen_range</span>(<span class="number">0</span>..<span class="ident">spawn</span>);
+                <span class="ident">trigger_send</span>(<span class="ident">addr</span>.<span class="ident">clone</span>(), <span class="ident">port</span>, <span class="ident">identities</span>[<span class="ident">n</span>]).<span class="kw">await</span>;
+            }
+            <span class="string">&quot;exit\n&quot;</span> <span class="op">=</span><span class="op">&gt;</span> {
                 <span class="kw">break</span>;
             }
-            <span class="prelude-val">Err</span>(<span class="ident">e</span>) <span class="op">=</span><span class="op">&gt;</span> {
-                <span class="macro">println!</span>(<span class="string">&quot;ERROR : echo_subscription send : {}&quot;</span>, <span class="ident">e</span>);
-                <span class="ident">tokio::time::sleep</span>(<span class="ident">std::time::Duration::from_secs</span>(<span class="number">1</span>)).<span class="kw">await</span>;
-            }
+            <span class="kw">_</span> <span class="op">=</span><span class="op">&gt;</span> {}
         }
     }
 }
@@ -496,6 +478,7 @@
 <span class="doccomment">///</span>
 <span class="doccomment">/// # Arguments</span>
 <span class="doccomment">///</span>
+<span class="doccomment">/// * `node_keychain` - The KeyChain of the node to setup.</span>
 <span class="doccomment">/// * `addr` - The adresse of the Rendez-Vous server.</span>
 <span class="doccomment">/// * `port` - The port of the Rendez-Vous server.</span>
 <span class="doccomment">/// * `i` - The ID of the node.</span>
@@ -508,6 +491,7 @@
 <span class="doccomment">/// * `d_thr` - The Delivery threshold.</span>
 <span class="doccomment">///</span>
 <span class="kw">async</span> <span class="kw">fn</span> <span class="ident">setup_node</span>(
+    <span class="ident">node_keychain</span>: <span class="ident">KeyChain</span>,
     <span class="ident">addr</span>: <span class="ident">String</span>,
     <span class="ident">port</span>: <span class="ident">u16</span>,
     <span class="ident">i</span>: <span class="ident">usize</span>,
@@ -519,13 +503,6 @@
     <span class="ident">d</span>: <span class="ident">usize</span>,
     <span class="ident">d_thr</span>: <span class="ident">usize</span>,
 ) {
-    <span class="kw">let</span> <span class="ident">node_keychain</span> <span class="op">=</span> <span class="ident">KeyChain::random</span>();
-    <span class="macro">println!</span>(
-        <span class="string">&quot;&lt;{}&gt; : KC : {:?}&quot;</span>,
-        <span class="ident">i</span>,
-        <span class="ident">node_keychain</span>.<span class="ident">keycard</span>().<span class="ident">identity</span>().<span class="ident">clone</span>()
-    );
-
     <span class="kw">let</span> <span class="ident">client</span> <span class="op">=</span> <span class="ident">Client::new</span>((<span class="ident">addr</span>.<span class="ident">clone</span>(), <span class="ident">port</span>), <span class="ident">Default::default</span>());
 
     <span class="ident">client</span>
@@ -534,7 +511,7 @@
         .<span class="ident">unwrap</span>();
 
     <span class="ident">tokio::time::sleep</span>(<span class="ident">std::time::Duration::from_secs</span>(<span class="number">10</span>)).<span class="kw">await</span>;
-    <span class="comment">//let keycards = client.get_shard(0).await.unwrap();</span>
+
     <span class="kw">let</span> <span class="ident">keycards</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">KeyCard</span><span class="op">&gt;</span> <span class="op">=</span> <span class="kw">loop</span> {
         <span class="kw">let</span> <span class="ident">kc</span> <span class="op">=</span> <span class="ident">client</span>.<span class="ident">get_shard</span>(<span class="number">0</span>).<span class="kw">await</span>;
         <span class="kw">match</span> <span class="ident">kc</span> {
@@ -604,10 +581,7 @@
         <span class="ident">kc</span>.<span class="ident">keycard</span>(),
         <span class="ident">i</span>,
     ));
-    <span class="kw">if</span> <span class="ident">i</span> <span class="op">=</span><span class="op">=</span> <span class="number">0</span> {
-        <span class="kw">let</span> <span class="ident">tmp_id</span> <span class="op">=</span> <span class="ident">kc</span>.<span class="ident">keycard</span>().<span class="ident">identity</span>().<span class="ident">clone</span>();
-        <span class="ident">tokio::spawn</span>(<span class="kw">async</span> <span class="kw">move</span> { <span class="ident">trigger_send</span>(<span class="ident">addr</span>, <span class="ident">port</span>, <span class="ident">tmp_id</span>).<span class="kw">await</span> });
-    }
+
     <span class="ident">node</span>.<span class="ident">listen</span>(<span class="ident">sender</span>, <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">receiver</span>, <span class="ident">kc</span>.<span class="ident">keycard</span>().<span class="ident">clone</span>())
         .<span class="kw">await</span>;
 }
@@ -651,7 +625,6 @@
             }
         }
     });
-    <span class="ident">tokio::time::sleep</span>(<span class="ident">std::time::Duration::from_secs</span>(<span class="number">60</span>)).<span class="kw">await</span>;
     <span class="kw">let</span> <span class="ident">t_sender</span> <span class="op">=</span> <span class="ident">sender</span>.<span class="ident">clone</span>();
     <span class="kw">let</span> <span class="ident">t_kc</span> <span class="op">=</span> <span class="ident">kc</span>.<span class="ident">clone</span>();
     <span class="kw">let</span> <span class="ident">t_init_keychain</span> <span class="op">=</span> <span class="ident">init_keychain</span>.<span class="ident">clone</span>();
@@ -672,7 +645,6 @@
             }
         }
     });
-    <span class="ident">tokio::time::sleep</span>(<span class="ident">std::time::Duration::from_secs</span>(<span class="number">120</span>)).<span class="kw">await</span>;
     <span class="kw">let</span> <span class="ident">t_sender</span> <span class="op">=</span> <span class="ident">sender</span>.<span class="ident">clone</span>();
     <span class="kw">let</span> <span class="ident">t_kc</span> <span class="op">=</span> <span class="ident">kc</span>.<span class="ident">clone</span>();
     <span class="kw">let</span> <span class="ident">t_init_keychain</span> <span class="op">=</span> <span class="ident">init_keychain</span>.<span class="ident">clone</span>();
@@ -695,6 +667,38 @@
             }
         }
     });
+}
+
+<span class="doccomment">/// Wait for system to finish setup and then send the signal to trigger the Broadcast.</span>
+<span class="doccomment">///</span>
+<span class="doccomment">/// # Arguments</span>
+<span class="doccomment">///</span>
+<span class="doccomment">/// * `addr` - The adresse of the Rendez-Vous server.</span>
+<span class="doccomment">/// * `port` - The port of the Rendez-Vous server.</span>
+<span class="doccomment">/// * `id` - The Identity of the Node which will receive the signal.</span>
+<span class="doccomment">///</span>
+<span class="kw">async</span> <span class="kw">fn</span> <span class="ident">trigger_send</span>(<span class="ident">addr</span>: <span class="ident">String</span>, <span class="ident">port</span>: <span class="ident">u16</span>, <span class="ident">id</span>: <span class="ident">Identity</span>) {
+    <span class="macro">my_print!</span>(<span class="string">&quot;Trigger send&quot;</span>);
+    <span class="kw">let</span> <span class="ident">sender_keychain</span> <span class="op">=</span> <span class="ident">KeyChain::random</span>();
+
+    <span class="kw">let</span> <span class="ident">connector</span> <span class="op">=</span> <span class="ident">Connector::new</span>((<span class="ident">addr</span>, <span class="ident">port</span>), <span class="ident">sender_keychain</span>.<span class="ident">clone</span>(), <span class="ident">Default::default</span>());
+
+    <span class="kw">let</span> <span class="ident">tmp_sender</span>: <span class="ident">Sender</span><span class="op">&lt;</span><span class="ident">SignedMessage</span><span class="op">&gt;</span> <span class="op">=</span> <span class="ident">Sender::new</span>(<span class="ident">connector</span>, <span class="ident">Default::default</span>());
+    <span class="kw">let</span> <span class="ident">msg</span> <span class="op">=</span> <span class="ident">Message::new</span>(<span class="number">9</span>, <span class="ident">String::from</span>(<span class="string">&quot;Trigger send&quot;</span>));
+    <span class="kw">let</span> <span class="ident">signature</span> <span class="op">=</span> <span class="ident">sender_keychain</span>.<span class="ident">sign</span>(<span class="kw-2">&amp;</span><span class="ident">Gossip</span>(<span class="ident">msg</span>.<span class="ident">clone</span>())).<span class="ident">unwrap</span>();
+    <span class="kw">let</span> <span class="ident">signed_msg</span>: <span class="ident">SignedMessage</span> <span class="op">=</span> <span class="ident">SignedMessage::new</span>(<span class="ident">msg</span>, <span class="ident">signature</span>);
+    <span class="kw">loop</span> {
+        <span class="kw">let</span> <span class="ident">r</span> <span class="op">=</span> <span class="ident">tmp_sender</span>.<span class="ident">send</span>(<span class="ident">id</span>, <span class="ident">signed_msg</span>.<span class="ident">clone</span>()).<span class="kw">await</span>;
+        <span class="kw">match</span> <span class="ident">r</span> {
+            <span class="prelude-val">Ok</span>(<span class="kw">_</span>) <span class="op">=</span><span class="op">&gt;</span> {
+                <span class="kw">break</span>;
+            }
+            <span class="prelude-val">Err</span>(<span class="ident">e</span>) <span class="op">=</span><span class="op">&gt;</span> {
+                <span class="macro">println!</span>(<span class="string">&quot;ERROR : echo_subscription send : {}&quot;</span>, <span class="ident">e</span>);
+                <span class="ident">tokio::time::sleep</span>(<span class="ident">std::time::Duration::from_secs</span>(<span class="number">1</span>)).<span class="kw">await</span>;
+            }
+        }
+    }
 }
 </code></pre></div>
 </section><section id="search" class="content hidden"></section><div id="rustdoc-vars" data-root-path="../../" data-current-crate="sbr_broadcast" data-search-index-js="../../search-index.js" data-search-js="../../search.js"></div>

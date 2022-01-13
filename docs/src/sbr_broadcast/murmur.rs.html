@@ -247,10 +247,10 @@
 <span class="doccomment">/// * `keychain` - KeyChain used to sign the Message.</span>
 <span class="doccomment">/// * `signed_msg` - The signed Message to deliver.</span>
 <span class="doccomment">/// * `node_sender` - The Node&#39;s Sender used to send Messages.</span>
-<span class="doccomment">/// * `gossip_peers` - The peers to which the Gossip will be spread.</span>
+<span class="doccomment">/// * `gossip_peers` - The Gossip peers.</span>
 <span class="doccomment">/// * `delivered_gossip` - The Atomic Reference Counter to the status of the delivered Gossip Message.</span>
 <span class="doccomment">/// * `echo` - The Atomic Reference Counter to the status of the Echo Message (used by Sieve).</span>
-<span class="doccomment">/// * `echo_peers` - The echo peers (used by Sieve).</span>
+<span class="doccomment">/// * `echo_peers` - The Echo peers (used by Sieve).</span>
 <span class="doccomment">///</span>
 <span class="kw">pub</span> <span class="kw">async</span> <span class="kw">fn</span> <span class="ident">deliver_gossip</span>(
     <span class="ident">keychain</span>: <span class="ident">KeyChain</span>,
@@ -284,7 +284,7 @@
 <span class="doccomment">/// * `peers` - The peers to which the Gossip will be spread.</span>
 <span class="doccomment">/// * `delivered_gossip` - The Atomic Reference Counter to the status of the delivered Gossip Message.</span>
 <span class="doccomment">/// * `echo` - The Atomic Reference Counter to the status of the Echo Message (used by Sieve).</span>
-<span class="doccomment">/// * `echo_peers` - The echo peers (used by Sieve).</span>
+<span class="doccomment">/// * `echo_peers` - The Echo peers (used by Sieve).</span>
 <span class="doccomment">///</span>
 <span class="kw">pub</span> <span class="kw">async</span> <span class="kw">fn</span> <span class="ident">dispatch</span>(
     <span class="ident">keychain</span>: <span class="ident">KeyChain</span>,
@@ -327,7 +327,7 @@
 <span class="doccomment">/// * `keychain` - KeyChain used to sign the Message.</span>
 <span class="doccomment">/// * `node_sender` - The Node&#39;s Sender used to send Messages.</span>
 <span class="doccomment">/// * `from` - The Identity of the Node subscribing.</span>
-<span class="doccomment">/// * `gossip_peers` - The Atomic Reference Counter to the peers to which the Gossip will be spread.</span>
+<span class="doccomment">/// * `gossip_peers` - The Atomic Reference Counter to the Gossip peers.</span>
 <span class="doccomment">/// * `delivered_gossip` - The status of the delivered Gossip Message.</span>
 <span class="doccomment">///</span>
 <span class="kw">pub</span> <span class="kw">async</span> <span class="kw">fn</span> <span class="ident">gossip_subscription</span>(

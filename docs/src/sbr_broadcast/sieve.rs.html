@@ -226,6 +226,8 @@
 <span id="226">226</span>
 <span id="227">227</span>
 <span id="228">228</span>
+<span id="229">229</span>
+<span id="230">230</span>
 </pre><pre class="rust"><code><span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::contagion</span>;
 <span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::message</span>::{<span class="ident">Message</span>, <span class="ident">SignedMessage</span>};
 <span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::message_headers</span>::{<span class="ident">Echo</span>, <span class="ident">EchoSubscription</span>};
@@ -377,6 +379,7 @@
 <span class="doccomment">/// * `delivered_echo` - The Atomic Reference Counter to the status of the delivered Echo Message.</span>
 <span class="doccomment">/// * `e_thr` - The threshold defining if enough Echo replies have been received.</span>
 <span class="doccomment">/// * `ready_peers` - The Ready peers (used by Contagion).</span>
+<span class="doccomment">/// * `ready_messages` - The Atomic Reference Counter to the vector of all Messages which are ready.</span>
 <span class="doccomment">///</span>
 <span class="kw">pub</span> <span class="kw">async</span> <span class="kw">fn</span> <span class="ident">deliver_echo</span>(
     <span class="ident">keychain</span>: <span class="ident">KeyChain</span>,
@@ -397,15 +400,14 @@
             <span class="ident">drop</span>(<span class="ident">locked_replies</span>);
         }
 
-        <span class="kw">let</span> <span class="ident">echo_replies</span>: <span class="ident">HashMap</span><span class="op">&lt;</span><span class="ident">Identity</span>, <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">Message</span><span class="op">&gt;</span><span class="op">&gt;</span> <span class="op">=</span> <span class="ident">echo_replies</span>.<span class="ident">lock</span>().<span class="kw">await</span>.<span class="ident">clone</span>();
         <span class="ident">check_echoes</span>(
-            <span class="ident">keychain</span>,
-            <span class="ident">node_sender</span>,
-            <span class="ident">delivered_echo</span>,
+            <span class="ident">keychain</span>.<span class="ident">clone</span>(),
+            <span class="ident">node_sender</span>.<span class="ident">clone</span>(),
+            <span class="ident">delivered_echo</span>.<span class="ident">clone</span>(),
             <span class="ident">e_thr</span>,
-            <span class="ident">ready_peers</span>,
+            <span class="ident">ready_peers</span>.<span class="ident">clone</span>(),
             <span class="ident">echo_replies</span>,
-            <span class="ident">ready_messages</span>,
+            <span class="ident">ready_messages</span>.<span class="ident">clone</span>(),
         )
         .<span class="kw">await</span>;
     }
@@ -422,6 +424,7 @@
 <span class="doccomment">/// * `e_thr` - The threshold defining if enough Echo replies have been received.</span>
 <span class="doccomment">/// * `ready_peers` - The Ready peers (used by Contagion).</span>
 <span class="doccomment">/// * `echo_replies` - The Echo replies received.</span>
+<span class="doccomment">/// * `ready_messages` - The Atomic Reference Counter to the vector of all Messages which are ready.</span>
 <span class="doccomment">///</span>
 <span class="kw">pub</span> <span class="kw">async</span> <span class="kw">fn</span> <span class="ident">check_echoes</span>(
     <span class="ident">keychain</span>: <span class="ident">KeyChain</span>,
@@ -429,10 +432,11 @@
     <span class="ident">delivered_echo</span>: <span class="ident">Arc</span><span class="op">&lt;</span><span class="ident">Mutex</span><span class="op">&lt;</span><span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">Message</span><span class="op">&gt;</span><span class="op">&gt;</span><span class="op">&gt;</span>,
     <span class="ident">e_thr</span>: <span class="ident">usize</span>,
     <span class="ident">ready_peers</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">Identity</span><span class="op">&gt;</span>,
-    <span class="ident">echo_replies</span>: <span class="ident">HashMap</span><span class="op">&lt;</span><span class="ident">Identity</span>, <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">Message</span><span class="op">&gt;</span><span class="op">&gt;</span>,
+    <span class="ident">echo_replies</span>: <span class="ident">Arc</span><span class="op">&lt;</span><span class="ident">Mutex</span><span class="op">&lt;</span><span class="ident">HashMap</span><span class="op">&lt;</span><span class="ident">Identity</span>, <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">Message</span><span class="op">&gt;</span><span class="op">&gt;</span><span class="op">&gt;</span><span class="op">&gt;</span>,
     <span class="ident">ready_messages</span>: <span class="ident">Arc</span><span class="op">&lt;</span><span class="ident">Mutex</span><span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">Message</span><span class="op">&gt;</span><span class="op">&gt;</span><span class="op">&gt;</span>,
 ) {
     <span class="kw">if</span> <span class="ident">delivered_echo</span>.<span class="ident">lock</span>().<span class="kw">await</span>.<span class="ident">is_none</span>() {
+        <span class="kw">let</span> <span class="ident">echo_replies</span>: <span class="ident">HashMap</span><span class="op">&lt;</span><span class="ident">Identity</span>, <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">Message</span><span class="op">&gt;</span><span class="op">&gt;</span> <span class="op">=</span> <span class="ident">echo_replies</span>.<span class="ident">lock</span>().<span class="kw">await</span>.<span class="ident">clone</span>();
         <span class="kw">let</span> <span class="ident">occ</span> <span class="op">=</span> <span class="ident">check_message_occurrences</span>(<span class="ident">echo_replies</span>);
         <span class="kw">for</span> <span class="ident">m</span> <span class="kw">in</span> <span class="ident">occ</span> {
             <span class="kw">if</span> <span class="ident">m</span>.<span class="number">1</span> <span class="op">&gt;</span><span class="op">=</span> <span class="ident">e_thr</span> {
