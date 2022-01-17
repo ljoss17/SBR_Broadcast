@@ -1,6 +1,6 @@
 use crate::message::{Message, SignedMessage};
 use crate::message_headers::{Ready, ReadySubscription};
-use crate::utils::{check_message_occurrences, sample};
+use crate::utils::{check_message_occurrences_contagion, sample_contagion};
 use itertools::Itertools;
 use std::collections::HashMap;
 use std::fs::File;
@@ -22,17 +22,21 @@ use tokio::sync::Mutex;
 /// * `d` - The number of Delivery peers.
 /// * `system` - The system in which the peers are randomly chosen.
 /// * `ready_replies` - The Atomic Reference Counter to the Ready replies from the chosen peers.
+/// * `duplicate_ready` - The reference to the HashMap containing information on Ready peers sampled multiple times.
 /// * `delivery_replies` - The Atomic Reference Counter to the Delivery replies from the chosen peers.
+/// * `duplicate_delivery` - The reference to the HashMap containing information on Delivery peers sampled multiple times.
 ///
 pub async fn init(
     r: usize,
     d: usize,
     system: Vec<KeyCard>,
-    ready_replies: &Arc<Mutex<HashMap<Identity, Option<Message>>>>,
-    delivery_replies: &Arc<Mutex<HashMap<Identity, Option<Message>>>>,
+    ready_replies: &Arc<Mutex<HashMap<Identity, Vec<Message>>>>,
+    delivery_replies: &Arc<Mutex<HashMap<Identity, Vec<Message>>>>,
+    duplicate_ready: &mut HashMap<Identity, usize>,
+    duplicate_delivery: &mut HashMap<Identity, usize>,
 ) {
-    sample(r, system.clone(), ready_replies).await;
-    sample(d, system.clone(), delivery_replies).await;
+    sample_contagion(r, system.clone(), ready_replies, duplicate_ready).await;
+    sample_contagion(d, system.clone(), delivery_replies, duplicate_delivery).await;
 }
 
 /// Send ReadySubscription to Ready and Delivery peers.
@@ -47,8 +51,8 @@ pub async fn init(
 pub async fn ready_subscribe(
     keychain: KeyChain,
     node_sender: Sender<SignedMessage>,
-    ready_replies: HashMap<Identity, Option<Message>>,
-    delivery_replies: HashMap<Identity, Option<Message>>,
+    ready_replies: HashMap<Identity, Vec<Message>>,
+    delivery_replies: HashMap<Identity, Vec<Message>>,
 ) {
     let push_settings = PushSettings {
         stop_condition: Acknowledgement::Strong,
@@ -156,7 +160,9 @@ pub async fn deliver(
 /// * `from` - The Identity of the Node sending the Ready.
 /// * `ready_subscribers` - The Ready peers subscribed to this Node.
 /// * `ready_replies` - The Atomic Reference Counter to the Ready replies to update.
+/// * `duplicate_ready` - The HashMap containing information on Ready peers sampled multiple times.
 /// * `delivery_replies` - The Atomic Reference Counter to the Delivery replies to update.
+/// * `duplicate_delivery` - The HashMap containing information on Delivery peers sampled multiple times.
 /// * `node_sender` - The Node's Sender used to send the Gossip Subscription to the peers.
 /// * `ready_messages` - The Atomic Reference Counter to the Messages which are Ready.
 /// * `r_thr` - The threshold defining if enough Ready replies have been received.
@@ -169,8 +175,10 @@ pub async fn deliver_ready(
     signed_msg: SignedMessage,
     from: Identity,
     ready_subscribers: Vec<Identity>,
-    ready_replies: Arc<Mutex<HashMap<Identity, Option<Message>>>>,
-    delivery_replies: Arc<Mutex<HashMap<Identity, Option<Message>>>>,
+    ready_replies: Arc<Mutex<HashMap<Identity, Vec<Message>>>>,
+    duplicate_ready: HashMap<Identity, usize>,
+    delivery_replies: Arc<Mutex<HashMap<Identity, Vec<Message>>>>,
+    duplicate_delivery: HashMap<Identity, usize>,
     node_sender: Sender<SignedMessage>,
     ready_messages: Arc<Mutex<Vec<Message>>>,
     r_thr: usize,
@@ -178,44 +186,45 @@ pub async fn deliver_ready(
     delivered: Arc<Mutex<Option<Message>>>,
 ) {
     let rp: Vec<Identity> = ready_replies.lock().await.clone().into_keys().collect();
-    let new_reply: Option<Message> = Some(signed_msg.clone().get_message());
+    let new_reply: Message = signed_msg.clone().get_message();
     if rp.contains(&from) {
-        let mut new_ready: bool = false;
-        if ready_replies.lock().await.clone()[&from].is_none() {
-            new_ready = true;
-        }
         drop(rp);
         let mut locked_ready_replies = ready_replies.lock().await;
-        locked_ready_replies.insert(from, new_reply.clone());
+        let mut old_messages: Vec<Message> = locked_ready_replies.get(&from).unwrap().clone();
+        old_messages.push(new_reply.clone());
+        locked_ready_replies.insert(from, old_messages.clone());
         drop(locked_ready_replies);
-        if new_ready {
-            tokio::spawn(async move {
-                check_ready(
-                    keychain,
-                    from.clone(),
-                    node_sender,
-                    ready_messages,
-                    r_thr,
-                    ready_subscribers,
-                    ready_replies,
-                )
-                .await;
-            });
-        }
+        tokio::spawn(async move {
+            check_ready(
+                keychain,
+                from.clone(),
+                node_sender,
+                ready_messages,
+                r_thr,
+                ready_subscribers,
+                ready_replies,
+                duplicate_ready,
+            )
+            .await;
+        });
     }
     let dp: Vec<Identity> = delivery_replies.lock().await.clone().into_keys().collect();
     if dp.contains(&from) {
-        let mut new_delivery: bool = false;
-        if delivery_replies.lock().await.clone()[&from].is_none() {
-            new_delivery = true;
-        }
         drop(dp);
         let mut locked_delivery_replies = delivery_replies.lock().await;
-        locked_delivery_replies.insert(from, new_reply.clone());
+        let mut old_messages: Vec<Message> = locked_delivery_replies.get(&from).unwrap().clone();
+        old_messages.push(new_reply.clone());
+        locked_delivery_replies.insert(from, old_messages.clone());
         drop(locked_delivery_replies);
-        if new_delivery {
-            check_delivery(id, from, d_thr, delivered, delivery_replies).await;
-        }
+        check_delivery(
+            id,
+            from,
+            d_thr,
+            delivered,
+            delivery_replies,
+            duplicate_delivery,
+        )
+        .await;
     }
 }
 
@@ -231,6 +240,7 @@ pub async fn deliver_ready(
 /// * `r_thr` - The threshold defining if enough Ready replies have been received.
 /// * `ready_subscribers` - The Ready peers subscribed to this Node.
 /// * `ready_replies` - The Atomic Reference Counter to the Ready replies from the chosen peers.
+/// * `duplicate_ready` - The HashMap containing information on Ready peers sampled multiple times.
 ///
 async fn check_ready(
     keychain: KeyChain,
@@ -239,16 +249,17 @@ async fn check_ready(
     ready_messages: Arc<Mutex<Vec<Message>>>,
     r_thr: usize,
     ready_subscribers: Vec<Identity>,
-    ready_replies: Arc<Mutex<HashMap<Identity, Option<Message>>>>,
+    ready_replies: Arc<Mutex<HashMap<Identity, Vec<Message>>>>,
+    duplicate_ready: HashMap<Identity, usize>,
 ) {
-    let ready_replies: HashMap<Identity, Option<Message>> = ready_replies.lock().await.clone();
+    let ready_replies: HashMap<Identity, Vec<Message>> = ready_replies.lock().await.clone();
     if ready_replies
         .clone()
         .into_keys()
         .collect::<Vec<Identity>>()
         .contains(&from)
     {
-        let occ = check_message_occurrences(ready_replies);
+        let occ = check_message_occurrences_contagion(ready_replies, duplicate_ready);
         for m in occ {
             if m.1 >= r_thr {
                 let msg = Message::new(2, m.0.clone());
@@ -285,16 +296,17 @@ async fn check_ready(
 /// * `d_thr` - The threshold defining if enough Delivery replies have been received.
 /// * `delivered` - The Atomic Reference Counter to the delivered Message.
 /// * `delivery_replies` - The Atomic Reference Counter to the delivery replies from the chosen peers.
+/// * `duplicate_ready` - The HashMap containing information on Ready peers sampled multiple times.
 ///
 async fn check_delivery(
     id: usize,
     from: Identity,
     d_thr: usize,
     delivered: Arc<Mutex<Option<Message>>>,
-    delivery_replies: Arc<Mutex<HashMap<Identity, Option<Message>>>>,
+    delivery_replies: Arc<Mutex<HashMap<Identity, Vec<Message>>>>,
+    duplicate_delivery: HashMap<Identity, usize>,
 ) {
-    let delivery_replies: HashMap<Identity, Option<Message>> =
-        delivery_replies.lock().await.clone();
+    let delivery_replies: HashMap<Identity, Vec<Message>> = delivery_replies.lock().await.clone();
     if delivery_replies
         .clone()
         .into_keys()
@@ -303,7 +315,7 @@ async fn check_delivery(
     {
         let mut locked_delivered = delivered.lock().await;
         if locked_delivered.is_none() {
-            let occ = check_message_occurrences(delivery_replies);
+            let occ = check_message_occurrences_contagion(delivery_replies, duplicate_delivery);
             for m in occ {
                 if m.1 >= d_thr {
                     my_print!(format!("{} delivered : {}", id, m.0.clone()));

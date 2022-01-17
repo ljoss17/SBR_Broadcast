@@ -212,15 +212,23 @@ async fn setup_node(
     .await;
     let mut receiver = Receiver::new(listener, Default::default());
 
-    let node: Node = Node::new(node_keychain.clone(), map_keycards, i, e_thr, r_thr, d_thr);
+    let mut node: Node = Node::new(node_keychain.clone(), map_keycards, i, e_thr, r_thr, d_thr);
     murmur::init(g, other_keycards.clone(), &node.gossip_peers).await;
-    sieve::init(e, other_keycards.clone(), &node.echo_replies).await;
+    sieve::init(
+        e,
+        other_keycards.clone(),
+        &node.echo_replies,
+        &mut node.duplicate_echo,
+    )
+    .await;
     contagion::init(
         r,
         d,
         other_keycards.clone(),
         &node.ready_replies,
         &node.delivery_replies,
+        &mut node.duplicate_ready,
+        &mut node.duplicate_delivery,
     )
     .await;
     let kc: KeyChain = node_keychain.clone();

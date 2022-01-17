@@ -1,7 +1,7 @@
 use crate::contagion;
 use crate::message::{Message, SignedMessage};
 use crate::message_headers::{Echo, EchoSubscription};
-use crate::utils::{check_message_occurrences, sample};
+use crate::utils::{check_message_occurrences_sieve, sample_sieve};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
@@ -19,13 +19,15 @@ use tokio::sync::Mutex;
 /// * `e` - The number of Echo peers.
 /// * `system` - The system in which the peers are randomly chosen.
 /// * `echo_replies` - The Atomic Reference Counter to the Echo replies from the chosen peers.
+/// * `duplicate_echo` - The reference to the HashMap containing information on Echo peers sampled multiple times.
 ///
 pub async fn init(
     e: usize,
     system: Vec<KeyCard>,
     echo_replies: &Arc<Mutex<HashMap<Identity, Option<Message>>>>,
+    duplicate_echo: &mut HashMap<Identity, usize>,
 ) {
-    sample(e, system, echo_replies).await;
+    sample_sieve(e, system, echo_replies, duplicate_echo).await;
 }
 
 /// Send EchoSubscription to Echo peers.
@@ -112,11 +114,11 @@ pub async fn deliver(
     keychain: KeyChain,
     signed_msg: SignedMessage,
     node_sender: Sender<SignedMessage>,
-    delivered_echo: Arc<Mutex<Option<Message>>>,
+    echo: Arc<Mutex<Option<Message>>>,
     echo_subscribers: Vec<Identity>,
 ) {
     let recv_msg = Some(signed_msg.clone().get_message());
-    let mut locked_echo = delivered_echo.lock().await;
+    let mut locked_echo = echo.lock().await;
     *locked_echo = recv_msg;
     drop(locked_echo);
     let msg: Message = Message::new(1, signed_msg.clone().get_message().content);
@@ -145,6 +147,7 @@ pub async fn deliver(
 /// * `message` - The Message of the Message (Without the prepending type).
 /// * `from` - The Identity of the Node sending the Echo.
 /// * `echo_replies` - The Atomic Reference Counter to the Echo replies received.
+/// * `duplicate_echo` - The HashMap containing information on Echo peers sampled multiple times.
 /// * `node_sender` - The Node's Sender used to send the Gossip Subscription to the peers.
 /// * `delivered_echo` - The Atomic Reference Counter to the status of the delivered Echo Message.
 /// * `e_thr` - The threshold defining if enough Echo replies have been received.
@@ -155,7 +158,9 @@ pub async fn deliver_echo(
     keychain: KeyChain,
     message: Message,
     from: Identity,
+    echo: Arc<Mutex<Option<Message>>>,
     echo_replies: Arc<Mutex<HashMap<Identity, Option<Message>>>>,
+    duplicate_echo: HashMap<Identity, usize>,
     node_sender: Sender<SignedMessage>,
     delivered_echo: Arc<Mutex<Option<Message>>>,
     e_thr: usize,
@@ -173,10 +178,12 @@ pub async fn deliver_echo(
         check_echoes(
             keychain.clone(),
             node_sender.clone(),
+            echo,
             delivered_echo.clone(),
             e_thr,
             ready_peers.clone(),
             echo_replies,
+            duplicate_echo,
             ready_messages.clone(),
         )
         .await;
@@ -194,37 +201,38 @@ pub async fn deliver_echo(
 /// * `e_thr` - The threshold defining if enough Echo replies have been received.
 /// * `ready_peers` - The Ready peers (used by Contagion).
 /// * `echo_replies` - The Echo replies received.
+/// * `duplicate_echo` - The HashMap containing information on Echo peers sampled multiple times.
 /// * `ready_messages` - The Atomic Reference Counter to the vector of all Messages which are ready.
 ///
 pub async fn check_echoes(
     keychain: KeyChain,
     node_sender: Sender<SignedMessage>,
+    echo: Arc<Mutex<Option<Message>>>,
     delivered_echo: Arc<Mutex<Option<Message>>>,
     e_thr: usize,
     ready_peers: Vec<Identity>,
     echo_replies: Arc<Mutex<HashMap<Identity, Option<Message>>>>,
+    duplicate_echo: HashMap<Identity, usize>,
     ready_messages: Arc<Mutex<Vec<Message>>>,
 ) {
-    if delivered_echo.lock().await.is_none() {
+    if delivered_echo.lock().await.is_none() && echo.lock().await.is_some() {
         let echo_replies: HashMap<Identity, Option<Message>> = echo_replies.lock().await.clone();
-        let occ = check_message_occurrences(echo_replies);
-        for m in occ {
-            if m.1 >= e_thr {
-                let msg = Message::new(1, m.0.clone());
-                let echo = Some(msg.clone());
-                let mut locked_delivered_echo = delivered_echo.lock().await;
-                *locked_delivered_echo = echo.clone();
-                drop(locked_delivered_echo);
-                contagion::deliver(
-                    keychain,
-                    msg.clone(),
-                    node_sender.clone(),
-                    ready_peers,
-                    ready_messages,
-                )
-                .await;
-                return;
-            }
+        let occ = check_message_occurrences_sieve(echo_replies, duplicate_echo, echo.clone()).await;
+        if occ >= e_thr {
+            let msg = Message::new(1, echo.lock().await.as_ref().unwrap().content.clone());
+            let echo = Some(msg.clone());
+            let mut locked_delivered_echo = delivered_echo.lock().await;
+            *locked_delivered_echo = echo.clone();
+            drop(locked_delivered_echo);
+            contagion::deliver(
+                keychain,
+                msg.clone(),
+                node_sender.clone(),
+                ready_peers,
+                ready_messages,
+            )
+            .await;
+            return;
         }
     }
 }

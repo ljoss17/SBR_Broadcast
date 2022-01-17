@@ -23,9 +23,12 @@ pub struct Node {
     delivery_threshold: usize,
     pub echo: Arc<Mutex<Option<Message>>>,
     pub echo_replies: Arc<Mutex<HashMap<Identity, Option<Message>>>>,
-    pub ready_replies: Arc<Mutex<HashMap<Identity, Option<Message>>>>,
+    pub duplicate_echo: HashMap<Identity, usize>,
+    pub ready_replies: Arc<Mutex<HashMap<Identity, Vec<Message>>>>,
+    pub duplicate_ready: HashMap<Identity, usize>,
     ready_messages: Arc<Mutex<Vec<Message>>>,
-    pub delivery_replies: Arc<Mutex<HashMap<Identity, Option<Message>>>>,
+    pub delivery_replies: Arc<Mutex<HashMap<Identity, Vec<Message>>>>,
+    pub duplicate_delivery: HashMap<Identity, usize>,
     pub delivered_gossip: Arc<Mutex<Option<Message>>>,
     delivered_echo: Arc<Mutex<Option<Message>>>,
     delivered_msg: Arc<Mutex<Option<Message>>>,
@@ -52,9 +55,12 @@ impl Node {
             delivery_threshold,
             echo: Arc::new(Mutex::new(None)),
             echo_replies: Arc::new(Mutex::new(HashMap::new())),
+            duplicate_echo: HashMap::new(),
             ready_replies: Arc::new(Mutex::new(HashMap::new())),
+            duplicate_ready: HashMap::new(),
             ready_messages: Arc::new(Mutex::new(Vec::new())),
             delivery_replies: Arc::new(Mutex::new(HashMap::new())),
+            duplicate_delivery: HashMap::new(),
             delivered_gossip: Arc::new(Mutex::new(None)),
             delivered_echo: Arc::new(Mutex::new(None)),
             delivered_msg: Arc::new(Mutex::new(None)),
@@ -111,13 +117,18 @@ impl Node {
                         let rp = self.ready_subscribers.lock().await.clone();
                         let de = self.delivered_echo.clone();
                         let er = self.echo_replies.clone();
+                        let duplicates = self.duplicate_echo.clone();
+                        let echo = self.echo.clone();
                         let ethr = self.echo_threshold.clone();
                         let m = message.clone().get_message();
                         let s = sender.clone();
                         let keychain = self.kc.clone();
                         let rm = self.ready_messages.clone();
                         tokio::spawn(async move {
-                            deliver_echo(keychain, m, identity, er, s, de, ethr, rp, rm).await
+                            deliver_echo(
+                                keychain, m, identity, echo, er, duplicates, s, de, ethr, rp, rm,
+                            )
+                            .await
                         });
                     } else {
                         my_print!(format!("Problem with Echo : {:?}", correct));
@@ -133,7 +144,9 @@ impl Node {
                         acknowledger.strong();
                         let rp = self.ready_subscribers.lock().await.clone();
                         let rr = self.ready_replies.clone();
+                        let duplicate_ready = self.duplicate_delivery.clone();
                         let dr = self.delivery_replies.clone();
+                        let duplicate_delivery = self.duplicate_delivery.clone();
                         let rm = self.ready_messages.clone();
                         let dm = self.delivered_msg.clone();
                         let rthr = self.ready_threshold.clone();
@@ -144,7 +157,20 @@ impl Node {
                         let keychain = self.kc.clone();
                         tokio::spawn(async move {
                             deliver_ready(
-                                keychain, id, m, identity, rp, rr, dr, s, rm, rthr, dthr, dm,
+                                keychain,
+                                id,
+                                m,
+                                identity,
+                                rp,
+                                rr,
+                                duplicate_ready,
+                                dr,
+                                duplicate_delivery,
+                                s,
+                                rm,
+                                rthr,
+                                dthr,
+                                dm,
                             )
                             .await
                         });
