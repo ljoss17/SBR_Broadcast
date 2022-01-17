@@ -262,6 +262,32 @@
 <span id="262">262</span>
 <span id="263">263</span>
 <span id="264">264</span>
+<span id="265">265</span>
+<span id="266">266</span>
+<span id="267">267</span>
+<span id="268">268</span>
+<span id="269">269</span>
+<span id="270">270</span>
+<span id="271">271</span>
+<span id="272">272</span>
+<span id="273">273</span>
+<span id="274">274</span>
+<span id="275">275</span>
+<span id="276">276</span>
+<span id="277">277</span>
+<span id="278">278</span>
+<span id="279">279</span>
+<span id="280">280</span>
+<span id="281">281</span>
+<span id="282">282</span>
+<span id="283">283</span>
+<span id="284">284</span>
+<span id="285">285</span>
+<span id="286">286</span>
+<span id="287">287</span>
+<span id="288">288</span>
+<span id="289">289</span>
+<span id="290">290</span>
 </pre><pre class="rust"><code><span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::contagion</span>::{<span class="ident">deliver_ready</span>, <span class="ident">ready_subscribe</span>, <span class="ident">ready_subscription</span>};
 <span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::message</span>::{<span class="ident">Message</span>, <span class="ident">SignedMessage</span>};
 <span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::message_headers</span>::{
@@ -287,9 +313,12 @@
     <span class="ident">delivery_threshold</span>: <span class="ident">usize</span>,
     <span class="kw">pub</span> <span class="ident">echo</span>: <span class="ident">Arc</span><span class="op">&lt;</span><span class="ident">Mutex</span><span class="op">&lt;</span><span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">Message</span><span class="op">&gt;</span><span class="op">&gt;</span><span class="op">&gt;</span>,
     <span class="kw">pub</span> <span class="ident">echo_replies</span>: <span class="ident">Arc</span><span class="op">&lt;</span><span class="ident">Mutex</span><span class="op">&lt;</span><span class="ident">HashMap</span><span class="op">&lt;</span><span class="ident">Identity</span>, <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">Message</span><span class="op">&gt;</span><span class="op">&gt;</span><span class="op">&gt;</span><span class="op">&gt;</span>,
-    <span class="kw">pub</span> <span class="ident">ready_replies</span>: <span class="ident">Arc</span><span class="op">&lt;</span><span class="ident">Mutex</span><span class="op">&lt;</span><span class="ident">HashMap</span><span class="op">&lt;</span><span class="ident">Identity</span>, <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">Message</span><span class="op">&gt;</span><span class="op">&gt;</span><span class="op">&gt;</span><span class="op">&gt;</span>,
+    <span class="kw">pub</span> <span class="ident">duplicate_echo</span>: <span class="ident">HashMap</span><span class="op">&lt;</span><span class="ident">Identity</span>, <span class="ident">usize</span><span class="op">&gt;</span>,
+    <span class="kw">pub</span> <span class="ident">ready_replies</span>: <span class="ident">Arc</span><span class="op">&lt;</span><span class="ident">Mutex</span><span class="op">&lt;</span><span class="ident">HashMap</span><span class="op">&lt;</span><span class="ident">Identity</span>, <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">Message</span><span class="op">&gt;</span><span class="op">&gt;</span><span class="op">&gt;</span><span class="op">&gt;</span>,
+    <span class="kw">pub</span> <span class="ident">duplicate_ready</span>: <span class="ident">HashMap</span><span class="op">&lt;</span><span class="ident">Identity</span>, <span class="ident">usize</span><span class="op">&gt;</span>,
     <span class="ident">ready_messages</span>: <span class="ident">Arc</span><span class="op">&lt;</span><span class="ident">Mutex</span><span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">Message</span><span class="op">&gt;</span><span class="op">&gt;</span><span class="op">&gt;</span>,
-    <span class="kw">pub</span> <span class="ident">delivery_replies</span>: <span class="ident">Arc</span><span class="op">&lt;</span><span class="ident">Mutex</span><span class="op">&lt;</span><span class="ident">HashMap</span><span class="op">&lt;</span><span class="ident">Identity</span>, <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">Message</span><span class="op">&gt;</span><span class="op">&gt;</span><span class="op">&gt;</span><span class="op">&gt;</span>,
+    <span class="kw">pub</span> <span class="ident">delivery_replies</span>: <span class="ident">Arc</span><span class="op">&lt;</span><span class="ident">Mutex</span><span class="op">&lt;</span><span class="ident">HashMap</span><span class="op">&lt;</span><span class="ident">Identity</span>, <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">Message</span><span class="op">&gt;</span><span class="op">&gt;</span><span class="op">&gt;</span><span class="op">&gt;</span>,
+    <span class="kw">pub</span> <span class="ident">duplicate_delivery</span>: <span class="ident">HashMap</span><span class="op">&lt;</span><span class="ident">Identity</span>, <span class="ident">usize</span><span class="op">&gt;</span>,
     <span class="kw">pub</span> <span class="ident">delivered_gossip</span>: <span class="ident">Arc</span><span class="op">&lt;</span><span class="ident">Mutex</span><span class="op">&lt;</span><span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">Message</span><span class="op">&gt;</span><span class="op">&gt;</span><span class="op">&gt;</span>,
     <span class="ident">delivered_echo</span>: <span class="ident">Arc</span><span class="op">&lt;</span><span class="ident">Mutex</span><span class="op">&lt;</span><span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">Message</span><span class="op">&gt;</span><span class="op">&gt;</span><span class="op">&gt;</span>,
     <span class="ident">delivered_msg</span>: <span class="ident">Arc</span><span class="op">&lt;</span><span class="ident">Mutex</span><span class="op">&lt;</span><span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">Message</span><span class="op">&gt;</span><span class="op">&gt;</span><span class="op">&gt;</span>,
@@ -316,9 +345,12 @@
             <span class="ident">delivery_threshold</span>,
             <span class="ident">echo</span>: <span class="ident">Arc::new</span>(<span class="ident">Mutex::new</span>(<span class="prelude-val">None</span>)),
             <span class="ident">echo_replies</span>: <span class="ident">Arc::new</span>(<span class="ident">Mutex::new</span>(<span class="ident">HashMap::new</span>())),
+            <span class="ident">duplicate_echo</span>: <span class="ident">HashMap::new</span>(),
             <span class="ident">ready_replies</span>: <span class="ident">Arc::new</span>(<span class="ident">Mutex::new</span>(<span class="ident">HashMap::new</span>())),
+            <span class="ident">duplicate_ready</span>: <span class="ident">HashMap::new</span>(),
             <span class="ident">ready_messages</span>: <span class="ident">Arc::new</span>(<span class="ident">Mutex::new</span>(<span class="ident">Vec::new</span>())),
             <span class="ident">delivery_replies</span>: <span class="ident">Arc::new</span>(<span class="ident">Mutex::new</span>(<span class="ident">HashMap::new</span>())),
+            <span class="ident">duplicate_delivery</span>: <span class="ident">HashMap::new</span>(),
             <span class="ident">delivered_gossip</span>: <span class="ident">Arc::new</span>(<span class="ident">Mutex::new</span>(<span class="prelude-val">None</span>)),
             <span class="ident">delivered_echo</span>: <span class="ident">Arc::new</span>(<span class="ident">Mutex::new</span>(<span class="prelude-val">None</span>)),
             <span class="ident">delivered_msg</span>: <span class="ident">Arc::new</span>(<span class="ident">Mutex::new</span>(<span class="prelude-val">None</span>)),
@@ -375,13 +407,18 @@
                         <span class="kw">let</span> <span class="ident">rp</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">ready_subscribers</span>.<span class="ident">lock</span>().<span class="kw">await</span>.<span class="ident">clone</span>();
                         <span class="kw">let</span> <span class="ident">de</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">delivered_echo</span>.<span class="ident">clone</span>();
                         <span class="kw">let</span> <span class="ident">er</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">echo_replies</span>.<span class="ident">clone</span>();
+                        <span class="kw">let</span> <span class="ident">duplicates</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">duplicate_echo</span>.<span class="ident">clone</span>();
+                        <span class="kw">let</span> <span class="ident">echo</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">echo</span>.<span class="ident">clone</span>();
                         <span class="kw">let</span> <span class="ident">ethr</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">echo_threshold</span>.<span class="ident">clone</span>();
                         <span class="kw">let</span> <span class="ident">m</span> <span class="op">=</span> <span class="ident">message</span>.<span class="ident">clone</span>().<span class="ident">get_message</span>();
                         <span class="kw">let</span> <span class="ident">s</span> <span class="op">=</span> <span class="ident">sender</span>.<span class="ident">clone</span>();
                         <span class="kw">let</span> <span class="ident">keychain</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">kc</span>.<span class="ident">clone</span>();
                         <span class="kw">let</span> <span class="ident">rm</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">ready_messages</span>.<span class="ident">clone</span>();
                         <span class="ident">tokio::spawn</span>(<span class="kw">async</span> <span class="kw">move</span> {
-                            <span class="ident">deliver_echo</span>(<span class="ident">keychain</span>, <span class="ident">m</span>, <span class="ident">identity</span>, <span class="ident">er</span>, <span class="ident">s</span>, <span class="ident">de</span>, <span class="ident">ethr</span>, <span class="ident">rp</span>, <span class="ident">rm</span>).<span class="kw">await</span>
+                            <span class="ident">deliver_echo</span>(
+                                <span class="ident">keychain</span>, <span class="ident">m</span>, <span class="ident">identity</span>, <span class="ident">echo</span>, <span class="ident">er</span>, <span class="ident">duplicates</span>, <span class="ident">s</span>, <span class="ident">de</span>, <span class="ident">ethr</span>, <span class="ident">rp</span>, <span class="ident">rm</span>,
+                            )
+                            .<span class="kw">await</span>
                         });
                     } <span class="kw">else</span> {
                         <span class="macro">my_print!</span>(<span class="macro">format!</span>(<span class="string">&quot;Problem with Echo : {:?}&quot;</span>, <span class="ident">correct</span>));
@@ -397,7 +434,9 @@
                         <span class="ident">acknowledger</span>.<span class="ident">strong</span>();
                         <span class="kw">let</span> <span class="ident">rp</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">ready_subscribers</span>.<span class="ident">lock</span>().<span class="kw">await</span>.<span class="ident">clone</span>();
                         <span class="kw">let</span> <span class="ident">rr</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">ready_replies</span>.<span class="ident">clone</span>();
+                        <span class="kw">let</span> <span class="ident">duplicate_ready</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">duplicate_delivery</span>.<span class="ident">clone</span>();
                         <span class="kw">let</span> <span class="ident">dr</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">delivery_replies</span>.<span class="ident">clone</span>();
+                        <span class="kw">let</span> <span class="ident">duplicate_delivery</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">duplicate_delivery</span>.<span class="ident">clone</span>();
                         <span class="kw">let</span> <span class="ident">rm</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">ready_messages</span>.<span class="ident">clone</span>();
                         <span class="kw">let</span> <span class="ident">dm</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">delivered_msg</span>.<span class="ident">clone</span>();
                         <span class="kw">let</span> <span class="ident">rthr</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">ready_threshold</span>.<span class="ident">clone</span>();
@@ -408,7 +447,20 @@
                         <span class="kw">let</span> <span class="ident">keychain</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">kc</span>.<span class="ident">clone</span>();
                         <span class="ident">tokio::spawn</span>(<span class="kw">async</span> <span class="kw">move</span> {
                             <span class="ident">deliver_ready</span>(
-                                <span class="ident">keychain</span>, <span class="ident">id</span>, <span class="ident">m</span>, <span class="ident">identity</span>, <span class="ident">rp</span>, <span class="ident">rr</span>, <span class="ident">dr</span>, <span class="ident">s</span>, <span class="ident">rm</span>, <span class="ident">rthr</span>, <span class="ident">dthr</span>, <span class="ident">dm</span>,
+                                <span class="ident">keychain</span>,
+                                <span class="ident">id</span>,
+                                <span class="ident">m</span>,
+                                <span class="ident">identity</span>,
+                                <span class="ident">rp</span>,
+                                <span class="ident">rr</span>,
+                                <span class="ident">duplicate_ready</span>,
+                                <span class="ident">dr</span>,
+                                <span class="ident">duplicate_delivery</span>,
+                                <span class="ident">s</span>,
+                                <span class="ident">rm</span>,
+                                <span class="ident">rthr</span>,
+                                <span class="ident">dthr</span>,
+                                <span class="ident">dm</span>,
                             )
                             .<span class="kw">await</span>
                         });

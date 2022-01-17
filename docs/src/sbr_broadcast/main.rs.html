@@ -349,6 +349,14 @@
 <span id="349">349</span>
 <span id="350">350</span>
 <span id="351">351</span>
+<span id="352">352</span>
+<span id="353">353</span>
+<span id="354">354</span>
+<span id="355">355</span>
+<span id="356">356</span>
+<span id="357">357</span>
+<span id="358">358</span>
+<span id="359">359</span>
 </pre><pre class="rust"><code><span class="attribute">#![<span class="ident">crate_name</span> <span class="op">=</span> <span class="string">&quot;sbr_broadcast&quot;</span>]</span>
 
 <span class="attribute">#[<span class="ident">macro_use</span>]</span>
@@ -563,15 +571,23 @@
     .<span class="kw">await</span>;
     <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">receiver</span> <span class="op">=</span> <span class="ident">Receiver::new</span>(<span class="ident">listener</span>, <span class="ident">Default::default</span>());
 
-    <span class="kw">let</span> <span class="ident">node</span>: <span class="ident">Node</span> <span class="op">=</span> <span class="ident">Node::new</span>(<span class="ident">node_keychain</span>.<span class="ident">clone</span>(), <span class="ident">map_keycards</span>, <span class="ident">i</span>, <span class="ident">e_thr</span>, <span class="ident">r_thr</span>, <span class="ident">d_thr</span>);
+    <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">node</span>: <span class="ident">Node</span> <span class="op">=</span> <span class="ident">Node::new</span>(<span class="ident">node_keychain</span>.<span class="ident">clone</span>(), <span class="ident">map_keycards</span>, <span class="ident">i</span>, <span class="ident">e_thr</span>, <span class="ident">r_thr</span>, <span class="ident">d_thr</span>);
     <span class="ident">murmur::init</span>(<span class="ident">g</span>, <span class="ident">other_keycards</span>.<span class="ident">clone</span>(), <span class="kw-2">&amp;</span><span class="ident">node</span>.<span class="ident">gossip_peers</span>).<span class="kw">await</span>;
-    <span class="ident">sieve::init</span>(<span class="ident">e</span>, <span class="ident">other_keycards</span>.<span class="ident">clone</span>(), <span class="kw-2">&amp;</span><span class="ident">node</span>.<span class="ident">echo_replies</span>).<span class="kw">await</span>;
+    <span class="ident">sieve::init</span>(
+        <span class="ident">e</span>,
+        <span class="ident">other_keycards</span>.<span class="ident">clone</span>(),
+        <span class="kw-2">&amp;</span><span class="ident">node</span>.<span class="ident">echo_replies</span>,
+        <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">node</span>.<span class="ident">duplicate_echo</span>,
+    )
+    .<span class="kw">await</span>;
     <span class="ident">contagion::init</span>(
         <span class="ident">r</span>,
         <span class="ident">d</span>,
         <span class="ident">other_keycards</span>.<span class="ident">clone</span>(),
         <span class="kw-2">&amp;</span><span class="ident">node</span>.<span class="ident">ready_replies</span>,
         <span class="kw-2">&amp;</span><span class="ident">node</span>.<span class="ident">delivery_replies</span>,
+        <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">node</span>.<span class="ident">duplicate_ready</span>,
+        <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">node</span>.<span class="ident">duplicate_delivery</span>,
     )
     .<span class="kw">await</span>;
     <span class="kw">let</span> <span class="ident">kc</span>: <span class="ident">KeyChain</span> <span class="op">=</span> <span class="ident">node_keychain</span>.<span class="ident">clone</span>();
