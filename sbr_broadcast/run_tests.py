@@ -13,7 +13,7 @@ for i in range(100):
         sbr.communicate(input="send\n".encode(), timeout=10)
     except subprocess.TimeoutExpired:
         print("timeout")
-    time.sleep(180)
+    time.sleep(120)
     print("Will stop")
     sbr.kill()
     rendezvous.kill()
